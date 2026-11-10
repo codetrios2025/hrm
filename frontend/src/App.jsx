@@ -195,14 +195,14 @@ export default function App() {
       {/* ------------------------------------------------------------------ */}
 
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="w-full mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+        <div className="w-full mx-auto px-3 sm:px-6 py-3 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
           {/* Left Header */}
-          <div className="flex items-center space-x-4">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             {/* Logo */}
             <img
               src={logoImg}
               alt="oliveHRM Logo"
-              className="h-9 w-auto object-contain"
+              className="h-9 w-auto shrink-0 object-contain"
             />
 
             {/* Profile Avatar */}
@@ -219,14 +219,14 @@ export default function App() {
             </div>
 
             {/* User Information */}
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <p className="font-bold text-slate-900 text-sm leading-tight">
+                <p className="truncate font-bold text-slate-900 text-sm leading-tight">
                   {user.name}
                 </p>
 
                 {user.employeeId && (
-                  <span className="text-[10px] bg-slate-100 text-slate-600 font-mono px-1.5 py-0.5 rounded border border-slate-200">
+                  <span className="shrink-0 text-[10px] bg-slate-100 text-slate-600 font-mono px-1.5 py-0.5 rounded border border-slate-200">
                     {user.employeeId}
                   </span>
                 )}
@@ -239,35 +239,38 @@ export default function App() {
           </div>
 
           {/* Right Header Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
             {/* Change Password */}
             <button
+              aria-label="Change Password"
               onClick={() => setShowPasswordModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 rounded-lg transition bg-white font-medium shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-1.5 text-xs text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 rounded-lg transition bg-white font-medium shadow-sm"
             >
               <KeyRound className="w-3.5 h-3.5" />
 
-              <span>Change Password</span>
+              <span className="hidden sm:inline">Change Password</span>
             </button>
 
             {/* My Profile */}
             <button
+              aria-label="My Profile"
               onClick={() => setShowProfileModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 rounded-lg transition bg-white font-medium shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-1.5 text-xs text-slate-600 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 rounded-lg transition bg-white font-medium shadow-sm"
             >
               <UserIcon className="w-3.5 h-3.5" />
 
-              <span>My Profile</span>
+              <span className="hidden sm:inline">My Profile</span>
             </button>
 
             {/* Sign Out */}
             <button
+              aria-label="Sign Out"
               onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-lg transition bg-white font-medium shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-1.5 text-xs text-slate-600 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-lg transition bg-white font-medium shadow-sm"
             >
               <LogOut className="w-3.5 h-3.5" />
 
-              <span>Sign Out</span>
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
           </div>
         </div>
@@ -277,14 +280,14 @@ export default function App() {
       {/* Main Body                                                          */}
       {/* ------------------------------------------------------------------ */}
 
-      <div className="w-full mx-auto px-4 sm:px-6 py-6 flex-1 flex flex-row gap-6 items-start">
+      <div className="w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col md:flex-row gap-4 md:gap-6 items-stretch md:items-start">
         {/* ---------------------------------------------------------------- */}
         {/* Sidebar                                                          */}
         {/* ---------------------------------------------------------------- */}
 
-        <aside className="w-[260px] min-w-[260px] shrink-0">
-          <nav className="bg-white rounded-xl border border-slate-200 p-2 shadow-sm space-y-1 sticky top-20">
-            <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        <aside className="w-full min-w-0 shrink-0 md:w-[260px] md:min-w-[260px]">
+          <nav className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-slate-200 bg-white p-2 shadow-sm md:sticky md:top-20 md:block md:space-y-1">
+            <div className="hidden px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 md:block">
               Navigation
             </div>
 
@@ -297,7 +300,7 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition text-left ${
+                  className={`w-auto shrink-0 flex items-center gap-2 md:gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition text-left md:w-full ${
                     isActive
                       ? "bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-sm"
                       : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 border border-transparent"
@@ -309,7 +312,7 @@ export default function App() {
                     }`}
                   />
 
-                  <span className="truncate">{item.label}</span>
+                  <span className="whitespace-nowrap md:truncate">{item.label}</span>
                 </button>
               );
             })}
@@ -320,7 +323,7 @@ export default function App() {
         {/* Right Content Area                                                */}
         {/* ---------------------------------------------------------------- */}
 
-        <main className="flex-1 min-w-0">
+        <main className="w-full flex-1 min-w-0">
           {/* Daily Punch */}
           {activeTab === "daily-punch" && <AttendanceCard />}
 

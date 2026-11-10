@@ -212,7 +212,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4">
         <div className="bg-white p-6 rounded-xl shadow-lg text-sm text-slate-600">
           Loading profile...
         </div>
@@ -221,32 +221,34 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white w-full max-w-4xl rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2 backdrop-blur-sm sm:p-4">
+      <div className="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl sm:h-auto sm:max-h-[90vh]">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <div>
-            <h2 className="text-base font-bold text-slate-800">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-bold text-slate-800 sm:text-base">
               Employee Profile: {formData.firstName} {formData.lastName}
             </h2>
-            <p className="text-xs text-slate-500 font-mono">
+            <p className="truncate text-xs text-slate-500 font-mono">
               ID: {formData.employeeId}
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200"
+            aria-label="Close employee profile"
+            className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 flex flex-row overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
           {/* Sidebar */}
-          <aside className="w-56 bg-slate-50 border-r border-slate-200 p-4 flex flex-col shrink-0 gap-4">
-            <div className="flex flex-col items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-              <div className="relative group w-24 h-28 bg-slate-100 rounded border border-slate-300 overflow-hidden flex items-center justify-center mb-2">
+          <aside className="flex shrink-0 flex-col gap-2 border-b border-slate-200 bg-slate-50 p-2 sm:gap-4 sm:p-4 md:w-56 md:border-b-0 md:border-r">
+            <div className="flex shrink-0 flex-row items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm sm:gap-3 sm:p-3 md:flex-col">
+              <div className="relative group mb-0 flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-300 bg-slate-100 sm:h-14 sm:w-14 md:mb-2 md:h-28 md:w-24">
                 {formData.avatar ? (
                   <img
                     src={formData.avatar}
@@ -254,15 +256,16 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <UserIcon className="w-12 h-12 text-slate-400" />
+                  <UserIcon className="h-6 w-6 text-slate-400 md:h-12 md:w-12" />
                 )}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-medium transition cursor-pointer"
+                  aria-label="Change profile photo"
+                  className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center bg-slate-900/60 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100"
                 >
                   <Camera className="w-4 h-4 mb-1" />
-                  <span>Change</span>
+                  <span className="hidden md:inline">Change</span>
                 </button>
               </div>
 
@@ -274,24 +277,26 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                 onChange={handleImageChange}
               />
 
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-[11px] text-indigo-600 font-semibold hover:underline inline-flex items-center gap-1 mt-1"
-              >
-                <Upload className="w-3 h-3" />
-                <span>Upload Photo</span>
-              </button>
-              <p className="text-[9px] text-slate-400 mt-0.5">
-                JPG, PNG up to 2MB
-              </p>
+              <div className="min-w-0 md:text-center">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:underline"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>Upload Photo</span>
+                </button>
+                <p className="mt-0.5 text-[9px] text-slate-400">
+                  JPG, PNG up to 2MB
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain md:flex-col md:overflow-visible">
               <button
                 type="button"
                 onClick={() => setActiveSubTab("personal")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-left transition ${
+                className={`flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs font-semibold transition md:w-full ${
                   activeSubTab === "personal"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 hover:bg-slate-200/60"
@@ -304,7 +309,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
               <button
                 type="button"
                 onClick={() => setActiveSubTab("contact")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-left transition ${
+                className={`flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs font-semibold transition md:w-full ${
                   activeSubTab === "contact"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 hover:bg-slate-200/60"
@@ -317,7 +322,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
               <button
                 type="button"
                 onClick={() => setActiveSubTab("emergency")}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-left transition ${
+                className={`flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-xs font-semibold transition md:w-full ${
                   activeSubTab === "emergency"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 hover:bg-slate-200/60"
@@ -330,7 +335,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
               <button
                 type="button"
                 onClick={() => setActiveSubTab("documents")}
-                className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold transition ${
+                className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-xs font-semibold transition md:w-full ${
                   activeSubTab === "documents"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 hover:bg-slate-100"
@@ -345,7 +350,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
           {/* Form Content */}
           <form
             onSubmit={handleSubmit}
-            className="flex-1 p-6 overflow-y-auto space-y-4 flex flex-col justify-between"
+            className="flex min-h-0 min-w-0 flex-1 flex-col justify-between gap-4 overflow-y-auto p-3 sm:p-6"
           >
             <div className="space-y-4">
               {activeSubTab === "personal" && (
@@ -353,7 +358,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                   <h3 className="text-sm font-semibold text-slate-800 border-b pb-2">
                     Personal Details
                   </h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         First Name *
@@ -394,7 +399,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Employee ID
@@ -421,7 +426,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Driver's License Number
@@ -448,7 +453,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Gender
@@ -488,7 +493,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Nationality
@@ -523,7 +528,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     Contact Details
                   </h3>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Address Street 1
@@ -550,7 +555,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
                       <label className="block text-slate-600 mb-1">City</label>
                       <input
@@ -587,7 +592,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Mobile Phone
@@ -626,7 +631,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Work Email
@@ -660,7 +665,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                   <h3 className="text-sm font-semibold text-slate-800 border-b pb-2">
                     Emergency Contacts
                   </h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
                       <label className="block text-slate-600 mb-1">
                         Contact Name
@@ -726,7 +731,7 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                           type="file"
                           accept=".pdf,.jpg,.jpeg,.png"
                           onChange={(e) => setDocFile(e.target.files[0])}
-                          className="w-full border rounded p-1.5 text-xs text-slate-700 bg-white"
+                          className="w-full min-w-0 border rounded p-1.5 text-xs text-slate-700 bg-white"
                         />
                       </div>
                       <div>
@@ -750,20 +755,20 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                       {documents.map((doc) => (
                         <div
                           key={doc._id}
-                          className="flex items-center justify-between p-3 bg-slate-50 border rounded-xl text-xs"
+                          className="flex flex-col gap-3 rounded-xl border bg-slate-50 p-3 text-xs sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex min-w-0 items-center gap-2.5">
                             <FileText className="w-4 h-4 text-indigo-600" />
-                            <div>
+                            <div className="min-w-0">
                               <span className="font-bold text-slate-800 block">
                                 {doc.title}
                               </span>
-                              <span className="text-[10px] text-slate-400">
+                              <span className="block break-all text-[10px] text-slate-400">
                                 {doc.originalName}
                               </span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex shrink-0 items-center gap-2">
                             <a
                               href={`${import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, "") || "http://localhost:5000"}${doc.path}`}
                               target="_blank"
