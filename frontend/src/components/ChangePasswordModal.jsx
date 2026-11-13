@@ -3,7 +3,11 @@ import { KeyRound, X } from "lucide-react";
 import api from "../api/client";
 import { useToast } from "../context/ToastContext";
 
-export default function ChangePasswordModal({ onClose }) {
+export default function ChangePasswordModal({
+  onClose,
+  forceChange = false,
+  onChanged,
+}) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -22,6 +26,7 @@ export default function ChangePasswordModal({ onClose }) {
         newPassword,
       });
       showSuccess(res.message || "Password updated successfully");
+      await onChanged?.();
       onClose();
     } catch (err) {
       showError(err.message);
@@ -40,13 +45,22 @@ export default function ChangePasswordModal({ onClose }) {
               Change Password
             </h3>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          {!forceChange && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
+
+        {forceChange && (
+          <p className="mb-3 text-xs leading-5 text-amber-700">
+            For your account security, change the temporary password before
+            continuing.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           <div>
@@ -91,13 +105,15 @@ export default function ChangePasswordModal({ onClose }) {
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 border rounded text-slate-600 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
+            {!forceChange && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 border rounded text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            )}
             <button
               type="submit"
               disabled={loading}

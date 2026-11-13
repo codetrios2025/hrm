@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Tenant from "../models/Tenant.js";
 import TenantRequest from "../models/TenantRequest.js";
 import SuperAdminAuditLog from "../models/SuperAdminAuditLog.js";
+import Notification from "../models/Notification.js";
 import { User } from "../models/User.js";
 import { ENV } from "../config/env.js";
 import { isValidTenantSlug } from "../config/slugPolicy.js";
@@ -11,10 +12,14 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   sendTenantAdminWelcomeEmail,
-  sendTenantRequestReceivedEmail,
   sendTenantRequestRejectedEmail,
+  sendTenantRequestReceivedEmail,
   sendTenantRequestVerificationEmail,
 } from "../utils/email.js";
+import {
+  notifyAutomaticTenantSignup,
+  notifyVerifiedTenantRequest,
+} from "../utils/superAdminNotifications.js";
 
 const verificationLifetimeMs = 24 * 60 * 60 * 1000;
 const trialPeriodMs = 14 * 24 * 60 * 60 * 1000;
@@ -57,6 +62,7 @@ const buildAdminData = (tenantId, request, password) => ({
   password,
   role: "admin",
   emailVerified: true,
+  mustChangePassword: true,
 });
 
 export const createTenantRequestAccount = async (request) => {
@@ -247,6 +253,7 @@ export const verifyTenantRequestEmail = asyncHandler(async (req, res) => {
     if (result.modifiedCount !== 1) {
       throw new ApiError(400, "Invalid or expired request verification link");
     }
+    await notifyVerifiedTenantRequest(request);
     return ApiResponse.send(
       res,
       200,
@@ -282,6 +289,8 @@ export const verifyTenantRequestEmail = asyncHandler(async (req, res) => {
     if (result.modifiedCount !== 1) {
       throw new ApiError(409, "This request has already been processed");
     }
+    await notifyVerifiedTenantRequest(request);
+    await notifyAutomaticTenantSignup(request, account.tenant);
   } catch (error) {
     if (account) {
       await removeTenantRequestAccount(account);
@@ -310,15 +319,27 @@ export const verifyTenantRequestEmail = asyncHandler(async (req, res) => {
 });
 
 export const getTenantRequests = asyncHandler(async (req, res) => {
-  const page = req.query.page || 1;
-  const limit = req.query.limit || 20;
-  const filter = { status: "pending", emailVerified: true };
+  const page = Number(req.query.page || 1);
+  const limit = Number(req.query.limit || 20);
+  const filter = {
+    status: req.query.status || "pending",
+    emailVerified: true,
+  };
+  if (req.query.search) {
+    const search = req.query.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    filter.$or = [
+      { companyName: { $regex: search, $options: "i" } },
+      { slug: { $regex: search, $options: "i" } },
+      { contactName: { $regex: search, $options: "i" } },
+      { email: { $regex: search, $options: "i" } },
+    ];
+  }
   const [requests, total] = await Promise.all([
     TenantRequest.find(filter)
       .select(
-        "companyName slug contactName email phone employeeCountEstimate message status emailVerified createdAt",
+        "companyName slug contactName email phone employeeCountEstimate message status emailVerified rejectionReason tenantId reviewedAt createdAt",
       )
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
@@ -336,84 +357,111 @@ export const getTenantRequests = asyncHandler(async (req, res) => {
         totalPages: Math.ceil(total / limit),
       },
     },
-    "Verified tenant requests retrieved",
+    "Tenant requests retrieved",
   );
 });
 
-export const reviewTenantRequest = asyncHandler(async (req, res) => {
+export const getTenantRequest = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid tenant request ID");
   }
   const tenantRequest = await TenantRequest.findOne({
     _id: req.params.id,
-    status: "pending",
     emailVerified: true,
-  });
+  }).lean();
   if (!tenantRequest) {
-    throw new ApiError(404, "Verified pending request not found");
+    throw new ApiError(404, "Verified tenant request not found");
   }
 
-  if (req.body.status === "rejected") {
-    const reviewedAt = new Date();
-    const result = await TenantRequest.updateOne(
-      { _id: tenantRequest._id, status: "pending", emailVerified: true },
-      {
-        $set: {
-          status: "rejected",
-          rejectionReason: req.body.rejectionReason,
-          reviewedBy: req.superAdmin._id,
-          reviewedAt,
-        },
-      },
-    );
-    if (result.modifiedCount !== 1) {
-      throw new ApiError(409, "This request has already been reviewed");
-    }
-    await sendTenantRequestRejectedEmail({
-      contactName: tenantRequest.contactName,
-      email: tenantRequest.email,
-      rejectionReason: req.body.rejectionReason,
-    });
-    return ApiResponse.send(
-      res,
-      200,
-      { id: tenantRequest._id, status: "rejected" },
-      "Tenant request rejected",
-    );
+  return ApiResponse.send(res, 200, tenantRequest, "Tenant request retrieved");
+});
+
+export const approveTenantRequest = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    throw new ApiError(400, "Invalid tenant request ID");
   }
 
-  if (await Tenant.exists({ slug: tenantRequest.slug })) {
-    throw new ApiError(409, "The requested company code is already in use");
-  }
-
+  const password = crypto.randomBytes(18).toString("base64url");
+  const plan = req.body.plan || "free";
+  const trialDays = req.body.trialDays ?? 14;
+  const trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
+  let session;
   let account;
   try {
-    account = await createTenantRequestAccount(tenantRequest);
-    await emailAdminCredentials(account);
-    const result = await TenantRequest.updateOne(
-      { _id: tenantRequest._id, status: "pending", emailVerified: true },
-      {
-        $set: {
-          status: "approved",
-          tenantId: account.tenant._id,
-          reviewedBy: req.superAdmin._id,
-          reviewedAt: new Date(),
+    session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      const tenantRequest = await TenantRequest.findOne({
+        _id: req.params.id,
+        status: "pending",
+        emailVerified: true,
+      }).session(session);
+      if (!tenantRequest) {
+        throw new ApiError(409, "This request has already been processed");
+      }
+
+      const tenantData = {
+        ...buildTenantData(tenantRequest),
+        plan,
+        employeeLimitOverride: req.body.employeeLimit ?? null,
+        trialEndsAt,
+      };
+      const [tenant] = await Tenant.create([tenantData], { session });
+      const [admin] = await User.create(
+        [
+          buildAdminData(tenant._id, tenantRequest, password),
+        ],
+        { session },
+      );
+      const result = await TenantRequest.updateOne(
+        {
+          _id: tenantRequest._id,
+          status: "pending",
+          emailVerified: true,
         },
-      },
-    );
-    if (result.modifiedCount !== 1) {
-      throw new ApiError(409, "This request has already been reviewed");
-    }
+        {
+          $set: {
+            status: "approved",
+            tenantId: tenant._id,
+            reviewedBy: req.superAdmin._id,
+            reviewedAt: new Date(),
+          },
+        },
+        { session },
+      );
+      if (result.modifiedCount !== 1) {
+        throw new ApiError(409, "This request has already been processed");
+      }
+      account = { tenant, admin, password, request: tenantRequest };
+    });
   } catch (error) {
-    if (account) {
-      await removeTenantRequestAccount(account);
-    }
     if (error.code === 11000) {
       throw new ApiError(409, "The company code or administrator email is already in use");
     }
     if (error instanceof ApiError) throw error;
-    console.error("[Tenant Request] Approval provisioning failed", error);
-    throw new ApiError(502, "Tenant provisioning failed; the request remains pending");
+    if (isTransactionUnavailable(error)) {
+      throw new ApiError(
+        503,
+        "Tenant approval requires MongoDB transactions; the request was not changed",
+      );
+    }
+    console.error("[Tenant Request] Approval transaction failed", error);
+    throw new ApiError(502, "Tenant approval failed; the request was not changed");
+  } finally {
+    await session?.endSession();
+  }
+
+  if (!account) {
+    throw new ApiError(409, "This request has already been processed");
+  }
+
+  try {
+    await emailAdminCredentials(account);
+  } catch (error) {
+    console.error("[Tenant Request] Welcome email delivery failed", error);
+    throw new ApiError(
+      502,
+      "The tenant was created, but the welcome email could not be sent",
+    );
   }
 
   if (req.superAdminAuditLogId) {
@@ -427,7 +475,7 @@ export const reviewTenantRequest = asyncHandler(async (req, res) => {
     res,
     200,
     {
-      id: tenantRequest._id,
+      id: account.request._id,
       status: "approved",
       tenant: {
         id: account.tenant._id,
@@ -438,3 +486,99 @@ export const reviewTenantRequest = asyncHandler(async (req, res) => {
     "Tenant request approved and workspace credentials emailed",
   );
 });
+
+export const rejectTenantRequest = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    throw new ApiError(400, "Invalid tenant request ID");
+  }
+  const reviewedAt = new Date();
+  const tenantRequest = await TenantRequest.findOneAndUpdate(
+    {
+      _id: req.params.id,
+      status: "pending",
+      emailVerified: true,
+    },
+    {
+      $set: {
+        status: "rejected",
+        rejectionReason: req.body.reason,
+        reviewedBy: req.superAdmin._id,
+        reviewedAt,
+      },
+    },
+    { new: true },
+  );
+  if (!tenantRequest) {
+    throw new ApiError(409, "This request has already been processed");
+  }
+  await sendTenantRequestRejectedEmail({
+    contactName: tenantRequest.contactName,
+    email: tenantRequest.email,
+    rejectionReason: req.body.reason,
+  });
+  return ApiResponse.send(
+    res,
+    200,
+    { id: tenantRequest._id, status: "rejected" },
+    "Tenant request rejected",
+  );
+});
+
+export const getSuperAdminNotifications = asyncHandler(async (req, res) => {
+  const page = Number(req.query.page || 1);
+  const limit = Number(req.query.limit || 20);
+  const filter = {
+    $or: [{ superAdminId: null }, { superAdminId: req.superAdmin._id }],
+  };
+  const [notifications, unreadCount] = await Promise.all([
+    Notification.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Notification.countDocuments({ ...filter, isRead: false }),
+  ]);
+  return ApiResponse.send(
+    res,
+    200,
+    { notifications, unreadCount },
+    "Notifications retrieved",
+  );
+});
+
+export const markSuperAdminNotificationRead = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    throw new ApiError(400, "Invalid notification ID");
+  }
+  const filter = {
+    _id: req.params.id,
+    $or: [{ superAdminId: null }, { superAdminId: req.superAdmin._id }],
+  };
+  const notification = await Notification.findOneAndUpdate(
+    filter,
+    { $set: { isRead: true } },
+    { new: true },
+  ).lean();
+  if (!notification) {
+    throw new ApiError(404, "Notification not found");
+  }
+  return ApiResponse.send(res, 200, notification, "Notification marked as read");
+});
+
+export const markAllSuperAdminNotificationsRead = asyncHandler(
+  async (req, res) => {
+    const filter = {
+      isRead: false,
+      $or: [{ superAdminId: null }, { superAdminId: req.superAdmin._id }],
+    };
+    const result = await Notification.updateMany(filter, {
+      $set: { isRead: true },
+    });
+    return ApiResponse.send(
+      res,
+      200,
+      { modifiedCount: result.modifiedCount },
+      "All notifications marked as read",
+    );
+  },
+);

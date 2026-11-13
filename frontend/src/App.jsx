@@ -433,8 +433,12 @@ export default function App() {
       {/* Change Password Modal                                               */}
       {/* ------------------------------------------------------------------ */}
 
-      {showPasswordModal && (
-        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
+      {(showPasswordModal || user?.mustChangePassword) && (
+        <ChangePasswordModal
+          forceChange={user?.mustChangePassword}
+          onChanged={refreshUser}
+          onClose={() => setShowPasswordModal(false)}
+        />
       )}
 
       {/* ------------------------------------------------------------------ */}

@@ -11,8 +11,13 @@ import {
   updateTenantStatus,
 } from "../controllers/superAdmin.controller.js";
 import {
+  approveTenantRequest,
+  getSuperAdminNotifications,
+  getTenantRequest,
   getTenantRequests,
-  reviewTenantRequest,
+  markAllSuperAdminNotificationsRead,
+  markSuperAdminNotificationRead,
+  rejectTenantRequest,
 } from "../controllers/tenantRequest.controller.js";
 import {
   auditSuperAction,
@@ -24,9 +29,11 @@ import {
   auditHistoryQuerySchema,
   superAdminLoginSchema,
   tenantListQuerySchema,
+  tenantRequestApprovalSchema,
   tenantRequestListQuerySchema,
-  tenantRequestReviewSchema,
+  tenantRequestRejectionSchema,
   tenantRequestIdSchema,
+  notificationListQuerySchema,
   updateTenantSchema,
   updateTenantStatusSchema,
 } from "../validations/superAdmin.validation.js";
@@ -45,15 +52,40 @@ router.use(authenticateSuper, auditSuperAction);
 
 router.get("/tenants", validate(tenantListQuerySchema, "query"), getTenants);
 router.get(
-  "/tenant-requests",
+  "/requests",
   validate(tenantRequestListQuerySchema, "query"),
   getTenantRequests,
 );
-router.patch(
-  "/tenant-requests/:id/review",
+router.get(
+  "/requests/:id",
   validate(tenantRequestIdSchema, "params"),
-  validate(tenantRequestReviewSchema),
-  reviewTenantRequest,
+  getTenantRequest,
+);
+router.post(
+  "/requests/:id/approve",
+  validate(tenantRequestIdSchema, "params"),
+  validate(tenantRequestApprovalSchema),
+  approveTenantRequest,
+);
+router.post(
+  "/requests/:id/reject",
+  validate(tenantRequestIdSchema, "params"),
+  validate(tenantRequestRejectionSchema),
+  rejectTenantRequest,
+);
+router.get(
+  "/notifications",
+  validate(notificationListQuerySchema, "query"),
+  getSuperAdminNotifications,
+);
+router.patch(
+  "/notifications/read-all",
+  markAllSuperAdminNotificationsRead,
+);
+router.patch(
+  "/notifications/:id/read",
+  validate(tenantRequestIdSchema, "params"),
+  markSuperAdminNotificationRead,
 );
 router.post("/tenants", validate(createTenantSchema), createTenant);
 router.get("/tenants/:id", getTenantDetails);

@@ -46,17 +46,25 @@ export const auditHistoryQuerySchema = Joi.object({
 export const tenantRequestListQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(20),
+  status: Joi.string().valid("pending", "approved", "rejected").default("pending"),
+  search: Joi.string().trim().max(100).allow(""),
 });
 
 export const tenantRequestIdSchema = Joi.object({
   id: Joi.string().hex().length(24).required(),
 });
 
-export const tenantRequestReviewSchema = Joi.object({
-  status: Joi.string().valid("approved", "rejected").required(),
-  rejectionReason: Joi.when("status", {
-    is: "rejected",
-    then: Joi.string().trim().min(1).max(1000).required(),
-    otherwise: Joi.string().trim().max(1000).allow("").optional(),
-  }),
+export const tenantRequestApprovalSchema = Joi.object({
+  plan: Joi.string().valid("free", "basic", "pro"),
+  employeeLimit: Joi.number().integer().min(1).max(100000),
+  trialDays: Joi.number().integer().min(1).max(365),
+});
+
+export const tenantRequestRejectionSchema = Joi.object({
+  reason: Joi.string().trim().min(1).max(1000).required(),
+});
+
+export const notificationListQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(20),
 });

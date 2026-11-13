@@ -119,6 +119,7 @@ export const login = asyncHandler(async (req, res) => {
         leaveBalance: user.leaveBalance,
         tenantId: tenant._id,
         emailVerified: user.emailVerified !== false,
+        mustChangePassword: user.mustChangePassword === true,
         onboardingCompleted: tenant.onboarding?.completed ?? true,
         onboardingStep: tenant.onboarding?.step ?? 5,
         plan: tenant.plan,
@@ -148,6 +149,7 @@ export const getMe = asyncHandler(async (req, res) => {
   }
   const profile = user.toObject ? user.toObject() : { ...user };
   profile.emailVerified = user.emailVerified !== false;
+  profile.mustChangePassword = user.mustChangePassword === true;
   profile.onboardingCompleted = tenant.onboarding?.completed ?? true;
   profile.onboardingStep = tenant.onboarding?.step ?? 5;
   profile.plan = tenant.plan;
@@ -362,6 +364,7 @@ export const changePassword = asyncHandler(async (req, res) => {
   }
 
   user.password = newPassword;
+  user.mustChangePassword = false;
   await user.save();
 
   return ApiResponse.send(res, 200, null, "Password changed successfully");

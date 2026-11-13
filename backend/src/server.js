@@ -6,6 +6,7 @@ import Tenant from "./models/Tenant.js";
 import { initAttendanceCron } from "./jobs/attendance.cron.js";
 import { initLeaveRolloverCron } from "./jobs/leaveRollover.cron.js";
 import { initBillingGraceCron } from "./jobs/billingGrace.cron.js";
+import { initTenantRequestCron } from "./jobs/tenantRequest.cron.js";
 import { API_ROUTE_PREFIXES } from "./routes/index.js";
 
 // Connect Database
@@ -15,6 +16,7 @@ await connectDB();
 initAttendanceCron();
 initLeaveRolloverCron();
 initBillingGraceCron();
+initTenantRequestCron();
 
 // Assign fallback unique employee IDs to existing documents missing the field
 const tenants = await Tenant.find({}).select("_id").lean();

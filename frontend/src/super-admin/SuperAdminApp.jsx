@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  Bell,
   Building2,
   LayoutDashboard,
   LogOut,
@@ -123,6 +124,9 @@ export default function SuperAdminApp({ pathname, navigate }) {
     () => localStorage.getItem(TOKEN_KEY) || null,
   );
   const [admin, setAdmin] = useState(readStoredAdmin);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const { showInfo } = useToast();
   const isLoginPage = pathname.replace(/\/+$/, "") === "/super-admin/login";
 
@@ -144,6 +148,25 @@ export default function SuperAdminApp({ pathname, navigate }) {
     return () =>
       window.removeEventListener("super-admin-unauthorized", clearSession);
   }, []);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await superAdminApi.get("/super/notifications", {
+        params: { limit: 10 },
+      });
+      setNotifications(response.data.notifications || []);
+      setUnreadCount(response.data.unreadCount || 0);
+    } catch (error) {
+      console.error("Unable to load Super Admin notifications:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    loadNotifications();
+    const interval = window.setInterval(loadNotifications, 60_000);
+    return () => window.clearInterval(interval);
+  }, [loadNotifications, token]);
 
   const login = async (email, password) => {
     const response = await superAdminApi.post(SUPER_ADMIN_LOGIN_PATH, {
@@ -168,13 +191,44 @@ export default function SuperAdminApp({ pathname, navigate }) {
     navigate("/super-admin/login", true);
   };
 
+  const openNotification = async (notification) => {
+    try {
+      await superAdminApi.patch(
+        `/super/notifications/${notification._id}/read`,
+      );
+      setNotifications((current) =>
+        current.map((item) =>
+          item._id === notification._id ? { ...item, isRead: true } : item,
+        ),
+      );
+      setUnreadCount((count) => (notification.isRead ? count : Math.max(0, count - 1)));
+      setNotificationsOpen(false);
+      navigate(notification.link || "/super-admin");
+    } catch (error) {
+      console.error("Unable to mark Super Admin notification as read:", error);
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    try {
+      await superAdminApi.patch("/super/notifications/read-all");
+      setNotifications((current) =>
+        current.map((item) => ({ ...item, isRead: true })),
+      );
+      setUnreadCount(0);
+    } catch (error) {
+      console.error("Unable to mark notifications as read:", error);
+    }
+  };
+
   if (isLoginPage) {
     return <SuperAdminLogin onLogin={login} />;
   }
   if (!token) return null;
 
   const tenantDetails = pathname.match(/^\/super-admin\/tenants\/([^/]+)$/);
-  const activeSection = pathname.includes("/tenant-requests")
+  const activeSection = pathname.includes("/requests") ||
+    pathname.includes("/tenant-requests")
     ? "requests"
     : pathname.includes("/tenants")
     ? "tenants"
@@ -192,7 +246,9 @@ export default function SuperAdminApp({ pathname, navigate }) {
       />
     );
   } else if (activeSection === "requests") {
-    page = <SuperAdminTenantRequests />;
+    page = (
+      <SuperAdminTenantRequests pathname={pathname} navigate={navigate} />
+    );
   } else if (activeSection === "tenants") {
     page = <SuperAdminTenants navigate={navigate} />;
   } else {
@@ -215,6 +271,75 @@ export default function SuperAdminApp({ pathname, navigate }) {
             </span>
           </button>
           <div className="flex items-center gap-3">
+            <div className="relative">
+              <button
+                type="button"
+                aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+                aria-expanded={notificationsOpen}
+                onClick={() => setNotificationsOpen((open) => !open)}
+                className="relative rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+              {notificationsOpen && (
+                <div className="absolute right-0 top-12 z-50 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <p className="text-sm font-bold text-slate-800">
+                      Notifications
+                    </p>
+                    <button
+                      type="button"
+                      onClick={markAllNotificationsRead}
+                      disabled={!unreadCount}
+                      className="text-xs font-semibold text-[#64723b] disabled:text-slate-400"
+                    >
+                      Mark all read
+                    </button>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto">
+                    {notifications.length ? (
+                      notifications.map((notification) => (
+                        <button
+                          key={notification._id}
+                          type="button"
+                          onClick={() => openNotification(notification)}
+                          className={`block w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${
+                            notification.isRead ? "" : "bg-[#f7f8f2]"
+                          }`}
+                        >
+                          <span className="flex items-start justify-between gap-3">
+                            <span className="text-sm font-semibold text-slate-800">
+                              {notification.title}
+                            </span>
+                            {!notification.isRead && (
+                              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#64723b]" />
+                            )}
+                          </span>
+                          <span className="mt-1 block text-xs leading-5 text-slate-600">
+                            {notification.message}
+                          </span>
+                          <span className="mt-1 block text-[11px] text-slate-400">
+                            {new Intl.DateTimeFormat(undefined, {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            }).format(new Date(notification.createdAt))}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-4 py-8 text-center text-sm text-slate-500">
+                        You are all caught up.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-800">
                 {admin?.name || "Super Admin"}
@@ -251,7 +376,7 @@ export default function SuperAdminApp({ pathname, navigate }) {
               active={activeSection === "requests"}
               icon={MailCheck}
               label="Tenant requests"
-              onClick={() => navigate("/super-admin/tenant-requests")}
+              onClick={() => navigate("/super-admin/requests")}
             />
           </nav>
           <div className="mt-4 hidden rounded-xl border border-[#dce3cc] bg-[#f7f8f2] p-4 text-xs leading-5 text-slate-600 md:block">

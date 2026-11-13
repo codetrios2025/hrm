@@ -66,6 +66,20 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   req.user = currentUser;
   req.tenantId = currentUser.tenantId;
   req.tenant = tenant;
+  if (currentUser.mustChangePassword) {
+    const path = req.originalUrl.split("?")[0];
+    const isAllowed =
+      (req.method === "GET" && path === "/api/auth/me") ||
+      (req.method === "PATCH" && path === "/api/auth/change-password");
+    if (!isAllowed) {
+      const error = new ApiError(
+        403,
+        "Change your temporary password before continuing",
+      );
+      error.code = "PASSWORD_CHANGE_REQUIRED";
+      throw error;
+    }
+  }
   next();
 });
 

@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 const SUPER_SECRET = "tenant-requests-super-secret";
 process.env.SUPER_JWT_SECRET = SUPER_SECRET;
 process.env.SUPER_JWT_EXPIRES_IN = "1h";
+process.env.JWT_SECRET = "tenant-requests-tenant-secret";
 process.env.TENANT_SIGNUP_MODE = "approval";
 
 const [
@@ -17,6 +18,7 @@ const [
   { User },
   { default: SuperAdmin },
   { default: SuperAdminAuditLog },
+  { default: Notification },
   { emailTransport },
   { ENV },
 ] = await Promise.all([
@@ -26,6 +28,7 @@ const [
   import("../src/models/User.js"),
   import("../src/models/SuperAdmin.js"),
   import("../src/models/SuperAdminAuditLog.js"),
+  import("../src/models/Notification.js"),
   import("../src/utils/email.js"),
   import("../src/config/env.js"),
 ]);
@@ -43,6 +46,18 @@ after(
 
 const queryFor = (value) => ({
   select() {
+    return this;
+  },
+  session() {
+    return this;
+  },
+  where() {
+    return this;
+  },
+  withTransaction(callback) {
+    return callback();
+  },
+  endSession() {
     return this;
   },
   sort() {
@@ -135,6 +150,14 @@ test("slug-available accounts for pending requests and reserved words", async (t
 
 test("signup request emails verification first and only exposes verified requests", async (t) => {
   ENV.TENANT_SIGNUP_MODE = "approval";
+  ENV.SUPER_ADMIN_NOTIFY_EMAIL = "platform@example.com";
+  ENV.TELEGRAM_BOT_TOKEN = undefined;
+  ENV.TELEGRAM_CHAT_ID = undefined;
+  const notificationCreate = t.mock.method(
+    Notification,
+    "create",
+    async (data) => data,
+  );
   t.mock.method(Tenant, "exists", async () => null);
   t.mock.method(TenantRequest, "exists", async () => null);
   let created;
@@ -192,10 +215,29 @@ test("signup request emails verification first and only exposes verified request
   assert.equal(verificationFilter.emailVerificationToken, verifiedRequest.emailVerificationToken);
   assert.deepEqual(update.value.$set, { emailVerified: true });
   assert.equal(update.value.$unset.emailVerificationToken, 1);
+  assert.equal(sendMail.mock.callCount(), 3);
+  assert.equal(
+    sendMail.mock.calls[2].arguments[0].to,
+    ENV.SUPER_ADMIN_NOTIFY_EMAIL,
+  );
+  assert.equal(notificationCreate.mock.callCount(), 1);
+  assert.equal(notificationCreate.mock.calls[0].arguments[0].type, "tenant_request");
+  assert.match(
+    notificationCreate.mock.calls[0].arguments[0].link,
+    new RegExp(`/super-admin/requests/${created._id}$`),
+  );
 });
 
 test("auto mode creates a trial tenant and admin after email verification", async (t) => {
   ENV.TENANT_SIGNUP_MODE = "auto";
+  ENV.SUPER_ADMIN_NOTIFY_EMAIL = "platform@example.com";
+  ENV.TELEGRAM_BOT_TOKEN = undefined;
+  ENV.TELEGRAM_CHAT_ID = undefined;
+  const notificationCreate = t.mock.method(
+    Notification,
+    "create",
+    async (data) => data,
+  );
   const tenantId = new mongoose.Types.ObjectId();
   const adminId = new mongoose.Types.ObjectId();
   const token = "ab".repeat(32);
@@ -253,14 +295,20 @@ test("auto mode creates a trial tenant and admin after email verification", asyn
   assert.equal(adminData.tenantId, tenantId);
   assert.equal(adminData.role, "admin");
   assert.equal(adminData.emailVerified, true);
+  assert.equal(adminData.mustChangePassword, true);
   assert.equal(requestUpdate.update.$set.tenantId, tenantId);
   assert.equal(requestUpdate.update.$set.status, "approved");
-  assert.equal(sendMail.mock.callCount(), 1);
+  assert.equal(sendMail.mock.callCount(), 2);
   assert.match(sendMail.mock.calls[0].arguments[0].html, /Temporary Password/);
+  assert.equal(sendMail.mock.calls[1].arguments[0].to, ENV.SUPER_ADMIN_NOTIFY_EMAIL);
+  assert.equal(notificationCreate.mock.callCount(), 2);
+  assert.deepEqual(
+    notificationCreate.mock.calls.map((call) => call.arguments[0].type),
+    ["tenant_request", "tenant_signup"],
+  );
 });
 
-test("Super Admin sees only verified pending requests and can approve them", async (t) => {
-  ENV.TENANT_SIGNUP_MODE = "approval";
+test("Super Admin can list requests and atomically approve one", async (t) => {
   const superAdminId = new mongoose.Types.ObjectId();
   const tenantId = new mongoose.Types.ObjectId();
   const adminId = new mongoose.Types.ObjectId();
@@ -279,6 +327,9 @@ test("Super Admin sees only verified pending requests and can approve them", asy
     emailVerified: true,
     status: "pending",
   };
+  t.mock.method(SuperAdmin, "findById", () =>
+    queryFor({ _id: superAdminId, name: "Platform Admin" }),
+  );
   let listFilter;
   t.mock.method(TenantRequest, "find", (filter) => {
     listFilter = filter;
@@ -291,23 +342,25 @@ test("Super Admin sees only verified pending requests and can approve them", asy
     async () => ({ _id: "audit-request" }),
   );
 
-  const listResponse = await request("/api/super/tenant-requests", {
+  const listResponse = await request("/api/super/requests?status=pending", {
     headers: { Authorization: `Bearer ${superToken}` },
   });
   const listBody = await listResponse.json();
   assert.equal(listResponse.status, 200);
   assert.deepEqual(listFilter, { status: "pending", emailVerified: true });
   assert.equal(listBody.data.requests.length, 1);
-  t.mock.method(TenantRequest, "findOne", () => queryFor(tenantRequest));
 
-  t.mock.method(Tenant, "exists", async () => null);
-  t.mock.method(mongoose, "startSession", async () => {
-    const error = new Error("Transactions require a replica set");
-    error.code = 20;
-    throw error;
-  });
-  t.mock.method(Tenant, "create", async (data) => ({ ...data, _id: tenantId }));
-  t.mock.method(User, "create", async (data) => ({ ...data, _id: adminId }));
+  t.mock.method(TenantRequest, "findOne", () => queryFor(tenantRequest));
+  t.mock.method(mongoose, "startSession", async () => ({
+    withTransaction: async (callback) => callback(),
+    endSession: async () => {},
+  }));
+  t.mock.method(Tenant, "create", async ([data]) => [
+    { ...data, _id: tenantId },
+  ]);
+  t.mock.method(User, "create", async ([data]) => [
+    { ...data, _id: adminId },
+  ]);
   const requestUpdate = t.mock.method(
     TenantRequest,
     "updateOne",
@@ -321,11 +374,11 @@ test("Super Admin sees only verified pending requests and can approve them", asy
   const sendMail = t.mock.method(emailTransport, "sendMail", async () => ({}));
 
   const approveResponse = await request(
-    `/api/super/tenant-requests/${requestId}/review`,
+    `/api/super/requests/${requestId}/approve`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: { Authorization: `Bearer ${superToken}` },
-      body: JSON.stringify({ status: "approved" }),
+      body: JSON.stringify({ plan: "basic", employeeLimit: 35, trialDays: 21 }),
     },
   );
   const approveBody = await approveResponse.json();
@@ -334,6 +387,9 @@ test("Super Admin sees only verified pending requests and can approve them", asy
   assert.equal(approveBody.data.status, "approved");
   assert.equal(requestUpdate.mock.calls[0].arguments[1].$set.reviewedBy, superAdminId);
   assert.equal(requestUpdate.mock.calls[0].arguments[1].$set.tenantId, tenantId);
+  assert.equal(Tenant.create.mock.calls[0].arguments[0][0].plan, "basic");
+  assert.equal(Tenant.create.mock.calls[0].arguments[0][0].employeeLimitOverride, 35);
+  assert.equal(User.create.mock.calls[0].arguments[0][0].mustChangePassword, true);
   assert.equal(sendMail.mock.callCount(), 1);
   assert.equal(auditCreate.mock.callCount(), 2);
   assert.equal(auditUpdate.mock.callCount(), 1);
@@ -352,24 +408,20 @@ test("Super Admin rejection records a reason and emails the applicant", async (t
   t.mock.method(SuperAdmin, "findById", () =>
     queryFor({ _id: superAdminId, name: "Platform Admin" }),
   );
-  t.mock.method(TenantRequest, "findOne", () => queryFor(tenantRequest));
   let update;
-  t.mock.method(TenantRequest, "updateOne", async (_filter, updateValue) => {
+  t.mock.method(TenantRequest, "findOneAndUpdate", async (_filter, updateValue) => {
     update = updateValue;
-    return { modifiedCount: 1 };
+    return { ...tenantRequest, status: "rejected" };
   });
   t.mock.method(SuperAdminAuditLog, "create", async () => ({ _id: "audit-reject" }));
   const sendMail = t.mock.method(emailTransport, "sendMail", async () => ({}));
 
   const response = await request(
-    `/api/super/tenant-requests/${requestId}/review`,
+    `/api/super/requests/${requestId}/reject`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: { Authorization: `Bearer ${superToken}` },
-      body: JSON.stringify({
-        status: "rejected",
-        rejectionReason: "Please contact the sales team first.",
-      }),
+      body: JSON.stringify({ reason: "Please contact the sales team first." }),
     },
   );
   const body = await response.json();
@@ -381,6 +433,206 @@ test("Super Admin rejection records a reason and emails the applicant", async (t
   assert.equal(update.$set.rejectionReason, "Please contact the sales team first.");
   assert.equal(sendMail.mock.callCount(), 1);
   assert.match(sendMail.mock.calls[0].arguments[0].html, /Please contact the sales team first/);
+});
+
+test("Super Admin notifications can be listed and marked read", async (t) => {
+  const superAdminId = new mongoose.Types.ObjectId();
+  const notificationId = new mongoose.Types.ObjectId();
+  const notification = {
+    _id: notificationId,
+    type: "tenant_request",
+    title: "New request",
+    message: "A verified request arrived.",
+    link: "/super-admin/requests/123",
+    isRead: false,
+    createdAt: new Date(),
+  };
+  t.mock.method(SuperAdmin, "findById", () =>
+    queryFor({ _id: superAdminId, name: "Platform Admin" }),
+  );
+  t.mock.method(SuperAdminAuditLog, "create", async () => ({ _id: "audit" }));
+  t.mock.method(Notification, "find", () => queryFor([notification]));
+  t.mock.method(Notification, "countDocuments", async () => 1);
+  const listResponse = await request("/api/super/notifications", {
+    headers: { Authorization: `Bearer ${superToken}` },
+  });
+  const listBody = await listResponse.json();
+  assert.equal(listResponse.status, 200);
+  assert.equal(listBody.data.unreadCount, 1);
+  assert.equal(listBody.data.notifications[0].title, "New request");
+
+  let readFilter;
+  t.mock.method(Notification, "findOneAndUpdate", (filter) => {
+    readFilter = filter;
+    return queryFor({ ...notification, isRead: true });
+  });
+  const readResponse = await request(
+    `/api/super/notifications/${notificationId}/read`,
+    {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${superToken}` },
+    },
+  );
+  assert.equal(readResponse.status, 200);
+  assert.equal(readFilter._id, notificationId.toString());
+
+  let readAllFilter;
+  t.mock.method(Notification, "updateMany", async (filter) => {
+    readAllFilter = filter;
+    return { modifiedCount: 2 };
+  });
+  const readAllResponse = await request("/api/super/notifications/read-all", {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${superToken}` },
+  });
+  const readAllBody = await readAllResponse.json();
+  assert.equal(readAllResponse.status, 200);
+  assert.equal(readAllBody.data.modifiedCount, 2);
+  assert.equal(readAllFilter.isRead, false);
+});
+
+test("cannot approve a tenant request twice", async (t) => {
+  const superAdminId = new mongoose.Types.ObjectId();
+  const requestId = new mongoose.Types.ObjectId();
+  const tenantId = new mongoose.Types.ObjectId();
+  const requestDoc = {
+    _id: requestId,
+    companyName: "One-time Company",
+    slug: "one-time-company",
+    contactName: "One-time Contact",
+    email: "one-time@example.com",
+    status: "pending",
+    emailVerified: true,
+  };
+  let status = "pending";
+  t.mock.method(SuperAdmin, "findById", () =>
+    queryFor({ _id: superAdminId, name: "Platform Admin" }),
+  );
+  t.mock.method(SuperAdminAuditLog, "create", async () => ({ _id: "audit" }));
+  t.mock.method(mongoose, "startSession", async () => ({
+    withTransaction: async (callback) => callback(),
+    endSession: async () => {},
+  }));
+  t.mock.method(TenantRequest, "findOne", () =>
+    queryFor(status === "pending" ? requestDoc : null),
+  );
+  t.mock.method(Tenant, "create", async ([data]) => [
+    { ...data, _id: tenantId },
+  ]);
+  t.mock.method(User, "create", async ([data]) => [{ ...data, _id: "admin" }]);
+  t.mock.method(TenantRequest, "updateOne", async () => {
+    status = "approved";
+    return { modifiedCount: 1 };
+  });
+  t.mock.method(SuperAdminAuditLog, "updateOne", async () => ({ modifiedCount: 1 }));
+  t.mock.method(emailTransport, "sendMail", async () => ({}));
+
+  const endpoint = `/api/super/requests/${requestId}/approve`;
+  const first = await request(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${superToken}` },
+    body: JSON.stringify({}),
+  });
+  const second = await request(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${superToken}` },
+    body: JSON.stringify({}),
+  });
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 409);
+  assert.equal(Tenant.create.mock.callCount(), 1);
+});
+
+test("duplicate tenant slug is rejected during transactional approval", async (t) => {
+  const superAdminId = new mongoose.Types.ObjectId();
+  const requestId = new mongoose.Types.ObjectId();
+  const requestDoc = {
+    _id: requestId,
+    companyName: "Duplicate Company",
+    slug: "duplicate-company",
+    contactName: "Duplicate Contact",
+    email: "duplicate@example.com",
+    status: "pending",
+    emailVerified: true,
+  };
+  t.mock.method(SuperAdmin, "findById", () =>
+    queryFor({ _id: superAdminId, name: "Platform Admin" }),
+  );
+  t.mock.method(SuperAdminAuditLog, "create", async () => ({ _id: "audit" }));
+  t.mock.method(mongoose, "startSession", async () => ({
+    withTransaction: async (callback) => callback(),
+    endSession: async () => {},
+  }));
+  t.mock.method(TenantRequest, "findOne", () => queryFor(requestDoc));
+  const tenantCreate = t.mock.method(Tenant, "create", async () => {
+    const error = new Error("duplicate slug");
+    error.code = 11000;
+    throw error;
+  });
+  t.mock.method(User, "create", async () => {
+    throw new Error("the admin must not be created");
+  });
+  const requestUpdate = t.mock.method(TenantRequest, "updateOne", async () => ({
+    modifiedCount: 1,
+  }));
+
+  const response = await request(
+    `/api/super/requests/${requestId}/approve`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${superToken}` },
+      body: JSON.stringify({}),
+    },
+  );
+
+  assert.equal(response.status, 409);
+  assert.equal(tenantCreate.mock.callCount(), 1);
+  assert.equal(requestUpdate.mock.callCount(), 0);
+});
+
+test("tenant tokens cannot access Super Admin requests", async () => {
+  const tenantToken = jwt.sign(
+    {
+      id: new mongoose.Types.ObjectId().toString(),
+      tenantId: new mongoose.Types.ObjectId().toString(),
+      role: "admin",
+    },
+    process.env.JWT_SECRET,
+  );
+  const response = await request("/api/super/requests", {
+    headers: { Authorization: `Bearer ${tenantToken}` },
+  });
+  assert.equal(response.status, 401);
+});
+
+test("temporary tenant passwords block protected routes until changed", async (t) => {
+  const userId = new mongoose.Types.ObjectId();
+  const tenantId = new mongoose.Types.ObjectId();
+  t.mock.method(User, "findById", () =>
+    queryFor({
+      _id: userId,
+      tenantId,
+      role: "admin",
+      isActive: true,
+      mustChangePassword: true,
+    }),
+  );
+  t.mock.method(Tenant, "findById", () =>
+    queryFor({ _id: tenantId, status: "trial", plan: "free" }),
+  );
+  const tenantToken = jwt.sign(
+    { id: userId.toString(), tenantId: tenantId.toString(), role: "admin" },
+    process.env.JWT_SECRET,
+  );
+
+  const response = await request("/api/users/profile", {
+    headers: { Authorization: `Bearer ${tenantToken}` },
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(body.code, "PASSWORD_CHANGE_REQUIRED");
 });
 
 test("signup request honeypot blocks submissions before persistence", async (t) => {

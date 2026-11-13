@@ -273,3 +273,68 @@ export const sendTenantRequestRejectedEmail = async ({
     `,
   });
 };
+
+export const sendSuperAdminTenantRequestEmail = async ({
+  companyName,
+  slug,
+  contactName,
+  email,
+  employeeCountEstimate,
+  requestUrl,
+}) => {
+  const safeCompanyName = escapeHtml(companyName);
+  const safeSlug = escapeHtml(slug);
+  const safeContactName = escapeHtml(contactName);
+  const safeEmail = escapeHtml(email);
+  const safeRequestUrl = escapeHtml(requestUrl);
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: ENV.SUPER_ADMIN_NOTIFY_EMAIL,
+    subject: `New verified tenant request: ${companyName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+        <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2>New verified tenant request</h2>
+          <p><strong>Company:</strong> ${safeCompanyName} (${safeSlug})</p>
+          <p><strong>Contact:</strong> ${safeContactName} &lt;${safeEmail}&gt;</p>
+          <p><strong>Estimated employees:</strong> ${Number(employeeCountEstimate)}</p>
+          <p><a href="${safeRequestUrl}">Review this request</a></p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+export const sendSuperAdminTenantRequestReminderEmail = async ({
+  requests,
+}) => {
+  const entries = requests
+    .map((request) => {
+      const requestUrl = `${ENV.FRONTEND_URL.replace(/\/$/, "")}/super-admin/requests/${encodeURIComponent(request._id)}`;
+      return `
+        <li style="margin: 0 0 16px; padding: 0 0 16px; border-bottom: 1px solid #e2e8f0;">
+          <strong>${escapeHtml(request.companyName)}</strong> (${escapeHtml(request.slug)})<br/>
+          Contact: ${escapeHtml(request.contactName)} &lt;${escapeHtml(request.email)}&gt;<br/>
+          Submitted: ${escapeHtml(new Date(request.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }))}<br/>
+          <a href="${escapeHtml(requestUrl)}">Review request</a>
+        </li>
+      `;
+    })
+    .join("");
+
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: ENV.SUPER_ADMIN_NOTIFY_EMAIL,
+    subject: `${requests.length} pending oliveHRM tenant request${requests.length === 1 ? "" : "s"} need review`,
+    html: `
+      <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+        <div style="max-width: 640px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2>Pending tenant request reminder</h2>
+          <p>At least one verified tenant request has been pending for more than 24 hours. These verified requests are awaiting review:</p>
+          <ul style="padding-left: 20px;">${entries}</ul>
+          <p><a href="${escapeHtml(`${ENV.FRONTEND_URL.replace(/\/$/, "")}/super-admin/requests`)}">Open all tenant requests</a></p>
+        </div>
+      </div>
+    `,
+  });
+};

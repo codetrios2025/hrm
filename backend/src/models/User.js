@@ -85,6 +85,7 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     isActive: { type: Boolean, default: true }, // Status flag
+    mustChangePassword: { type: Boolean, default: false },
     lastLoginAt: { type: Date, default: null },
     emailVerified: { type: Boolean, default: true },
     emailVerificationToken: { type: String, default: null, select: false },
