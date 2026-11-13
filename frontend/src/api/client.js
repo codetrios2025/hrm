@@ -1,7 +1,10 @@
 import axios from "axios";
 
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
+  baseURL: API_BASE_URL,
 
   // IMPORTANT:
   // Do NOT set Content-Type globally.
@@ -16,65 +19,70 @@ const api = axios.create({
   // for FormData.
 });
 
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("token");
+const attachInterceptors = (client, tokenKey, onUnauthorized) => {
+  client.interceptors.request.use(
+    (config) => {
+      const token = localStorage.getItem(tokenKey);
 
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    /*
-     * IMPORTANT
-     * -----------------------------------------------
-     * If request body is FormData, NEVER set:
-     *
-     * Content-Type: application/json
-     *
-     * Axios/browser must create the multipart boundary.
-     */
-
-    if (config.data instanceof FormData) {
-      // Remove any previously configured JSON header
-      if (config.headers) {
-        delete config.headers["Content-Type"];
-        delete config.headers["content-type"];
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${token}`;
       }
-    } else {
-      // Normal API requests can use JSON
-      config.headers = config.headers || {};
 
-      if (!config.headers["Content-Type"]) {
-        config.headers["Content-Type"] = "application/json";
+      if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+        if (config.headers) {
+          delete config.headers["Content-Type"];
+          delete config.headers["content-type"];
+        }
+      } else {
+        config.headers = config.headers || {};
+        if (!config.headers["Content-Type"]) {
+          config.headers["Content-Type"] = "application/json";
+        }
       }
-    }
 
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
+      return config;
+    },
+    (error) => Promise.reject(error),
+  );
 
-api.interceptors.response.use(
-  (response) => response.data,
+  client.interceptors.response.use(
+    (response) => response.data,
+    (error) => {
+      const message =
+        error.response?.data?.message || error.message || "Request failed";
 
-  (error) => {
-    const message =
-      error.response?.data?.message || error.message || "Request failed";
-
-    if (error.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-
-      if (window.location.pathname !== "/login") {
-        window.location.reload();
+      if (error.response?.status === 401) {
+        onUnauthorized();
       }
-    }
 
-    return Promise.reject(new Error(message));
-  },
-);
+      const apiError = new Error(message);
+      apiError.code = error.response?.data?.code;
+      return Promise.reject(apiError);
+    },
+  );
+};
+
+attachInterceptors(api, "token", () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  if (window.location.pathname !== "/login") {
+    window.location.reload();
+  }
+});
+
+export const superAdminApi = axios.create({
+  baseURL: API_BASE_URL,
+});
+
+attachInterceptors(superAdminApi, "superAdminToken", () => {
+  localStorage.removeItem("superAdminToken");
+  localStorage.removeItem("superAdmin");
+  window.dispatchEvent(new Event("super-admin-unauthorized"));
+  if (window.location.pathname !== "/super-admin/login") {
+    window.history.replaceState(null, "", "/super-admin/login");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+});
 
 export default api;

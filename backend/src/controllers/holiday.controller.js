@@ -26,7 +26,7 @@ import { parse } from "csv-parse/sync";
 export const getHolidays = asyncHandler(async (req, res) => {
   const { year, page = 1, limit = 10, all = "false" } = req.query;
 
-  const query = {};
+  const query = { tenantId: req.tenantId };
 
   /*
   |--------------------------------------------------------------------------
@@ -159,6 +159,7 @@ export const createHoliday = asyncHandler(async (req, res) => {
   */
 
   const existing = await Holiday.findOne({
+    tenantId: req.tenantId,
     date,
   });
 
@@ -173,6 +174,7 @@ export const createHoliday = asyncHandler(async (req, res) => {
   */
 
   const holiday = await Holiday.create({
+    tenantId: req.tenantId,
     date,
     title: title.trim(),
     description: description?.trim() || "",
@@ -229,7 +231,7 @@ export const updateHoliday = asyncHandler(async (req, res) => {
   |--------------------------------------------------------------------------
   */
 
-  const holiday = await Holiday.findById(id);
+  const holiday = await Holiday.findOne({ _id: id, tenantId: req.tenantId });
 
   if (!holiday) {
     throw new ApiError(404, "Holiday not found");
@@ -245,6 +247,7 @@ export const updateHoliday = asyncHandler(async (req, res) => {
   */
 
   const duplicate = await Holiday.findOne({
+    tenantId: req.tenantId,
     date,
     _id: {
       $ne: id,
@@ -287,7 +290,10 @@ export const updateHoliday = asyncHandler(async (req, res) => {
 export const deleteHoliday = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const holiday = await Holiday.findByIdAndDelete(id);
+  const holiday = await Holiday.findOneAndDelete({
+    _id: id,
+    tenantId: req.tenantId,
+  });
 
   if (!holiday) {
     throw new ApiError(404, "Holiday not found");
@@ -426,6 +432,7 @@ export const importHolidaysold = async (req, res) => {
       */
 
       const existingHoliday = await Holiday.findOne({
+        tenantId: req.tenantId,
         date: parsedDate,
       });
 
@@ -435,6 +442,7 @@ export const importHolidaysold = async (req, res) => {
       }
 
       holidaysToInsert.push({
+        tenantId: req.tenantId,
         date: parsedDate,
         holiday: holidayName,
         description,
@@ -807,6 +815,7 @@ export const importHolidays2 = async (req, res) => {
       */
 
       const existingHoliday = await Holiday.findOne({
+        tenantId: req.tenantId,
         date: {
           $gte: startOfDay,
           $lte: endOfDay,
@@ -858,6 +867,7 @@ export const importHolidays2 = async (req, res) => {
       */
 
       holidaysToInsert.push({
+        tenantId: req.tenantId,
         date: parsedDate,
         holiday: holidayName,
         description,
@@ -1249,6 +1259,7 @@ export const importHolidays3 = async (req, res) => {
       */
 
       const existingHoliday = await Holiday.findOne({
+        tenantId: req.tenantId,
         date: {
           $gte: startOfDay,
           $lte: endOfDay,
@@ -1300,6 +1311,7 @@ export const importHolidays3 = async (req, res) => {
       */
 
       holidaysToInsert.push({
+        tenantId: req.tenantId,
         date: parsedDate,
         holiday: holidayName,
         description,
@@ -1686,6 +1698,7 @@ export const importHolidays = async (req, res) => {
       */
 
       const existingHoliday = await Holiday.findOne({
+        tenantId: req.tenantId,
         date: normalizedDate,
       });
 
@@ -1746,6 +1759,7 @@ export const importHolidays = async (req, res) => {
       */
 
       holidaysToInsert.push({
+        tenantId: req.tenantId,
         date: normalizedDate,
         title: holidayName,
         description,

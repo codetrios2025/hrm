@@ -22,6 +22,7 @@ export const clockIn = asyncHandler(async (req, res) => {
     req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
 
   const existingLog = await Attendance.findOne({
+    tenantId: req.tenantId,
     userId: req.user._id,
     date: today,
   });
@@ -31,6 +32,7 @@ export const clockIn = asyncHandler(async (req, res) => {
 
   const now = new Date();
   const attendance = await Attendance.create({
+    tenantId: req.tenantId,
     userId: req.user._id,
     date: today,
     clockIn: now,
@@ -46,6 +48,7 @@ export const recordHeartbeat = asyncHandler(async (req, res) => {
   const today = getLocalDateString();
 
   const attendance = await Attendance.findOne({
+    tenantId: req.tenantId,
     userId: req.user._id,
     date: today,
     status: "in-progress",
@@ -92,7 +95,11 @@ export const recordHeartbeat = asyncHandler(async (req, res) => {
 export const clockOut1 = asyncHandler(async (req, res) => {
   const today = getLocalDateString();
 
-  const log = await Attendance.findOne({ userId: req.user._id, date: today });
+  const log = await Attendance.findOne({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+    date: today,
+  });
   if (!log) {
     throw new ApiError(404, "No clock-in record found for today");
   }
@@ -129,7 +136,11 @@ export const clockOut09102026 = asyncHandler(async (req, res) => {
     ? getLocalDateString()
     : new Date().toISOString().split("T")[0];
 
-  const log = await Attendance.findOne({ userId: req.user._id, date: today });
+  const log = await Attendance.findOne({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+    date: today,
+  });
   if (!log) {
     throw new ApiError(404, "No clock-in record found for today");
   }
@@ -170,7 +181,11 @@ export const clockOut = asyncHandler(async (req, res) => {
     ? getLocalDateString()
     : new Date().toISOString().split("T")[0];
 
-  const log = await Attendance.findOne({ userId: req.user._id, date: today });
+  const log = await Attendance.findOne({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+    date: today,
+  });
   if (!log) {
     throw new ApiError(404, "No clock-in record found for today");
   }
@@ -214,9 +229,10 @@ export const clockOut = asyncHandler(async (req, res) => {
 
     if (coffEarned > 0) {
       // Atomically credit COFF to the user's leave balance
-      await User.findByIdAndUpdate(req.user._id, {
-        $inc: { "leaveBalance.coff": coffEarned },
-      });
+      await User.findOneAndUpdate(
+        { _id: req.user._id, tenantId: req.tenantId },
+        { $inc: { "leaveBalance.coff": coffEarned } },
+      );
     }
   }
 
@@ -232,7 +248,11 @@ export const clockOut = asyncHandler(async (req, res) => {
 
 export const getTodayStatus1 = asyncHandler(async (req, res) => {
   const today = getLocalDateString();
-  const log = await Attendance.findOne({ userId: req.user._id, date: today });
+  const log = await Attendance.findOne({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+    date: today,
+  });
   return ApiResponse.send(res, 200, log, "Daily attendance record");
 });
 
@@ -240,7 +260,11 @@ export const getTodayStatus = asyncHandler(async (req, res) => {
   const today = getLocalDateString
     ? getLocalDateString()
     : new Date().toISOString().split("T")[0];
-  const log = await Attendance.findOne({ userId: req.user._id, date: today });
+  const log = await Attendance.findOne({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+    date: today,
+  });
 
   if (log && log.clockIn && log.clockOut) {
     const diffMs =
@@ -269,7 +293,7 @@ export const getMyHistory = asyncHandler(async (req, res) => {
   const skip = (page - 1) * limit;
 
   const { month, year } = req.query;
-  const filter = { userId: req.user._id };
+  const filter = { tenantId: req.tenantId, userId: req.user._id };
 
   if (month && year) {
     const monthStr = String(month).padStart(2, "0");
@@ -308,7 +332,7 @@ export const getMyHistorynew = asyncHandler(async (req, res) => {
     targetUserId = req.query.userId;
   }
 
-  const query = { userId: targetUserId };
+  const query = { tenantId: req.tenantId, userId: targetUserId };
 
   if (month && year) {
     const formattedMonth = String(month).padStart(2, "0");
@@ -352,9 +376,10 @@ export const recordAttendanceOrPunch = asyncHandler(async (req, res) => {
 
   // If COFF is earned, credit it directly to user's leaveBalance.coff
   if (coffEarned > 0) {
-    await User.findByIdAndUpdate(req.user._id, {
-      $inc: { "leaveBalance.coff": coffEarned },
-    });
+    await User.findOneAndUpdate(
+      { _id: req.user._id, tenantId: req.tenantId },
+      { $inc: { "leaveBalance.coff": coffEarned } },
+    );
   }
 
   // ... continue with standard attendance recording logic ...

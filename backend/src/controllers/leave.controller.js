@@ -4,6 +4,8 @@ import { User } from "../models/User.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ROLES } from "../constants/roles.js";
+import { getTenantUploadStoredPath } from "../utils/uploadPaths.js";
 
 // Helper to count inclusive days between dates
 const getDaysDifference = (start, end) => {
@@ -37,7 +39,10 @@ export const applyLeaveold2oct = asyncHandler(async (req, res) => {
   const daysCount = getDaysDifference(startDate, endDate);
 
   // Find user
-  const user = await User.findById(req.user._id);
+  const user = await User.findOne({
+    _id: req.user._id,
+    tenantId: req.tenantId,
+  });
 
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -62,6 +67,7 @@ export const applyLeaveold2oct = asyncHandler(async (req, res) => {
   // ----------------------------------------------------------
 
   const overlapping = await Leave.findOne({
+    tenantId: req.tenantId,
     userId: user._id,
     status: { $in: ["pending", "approved"] },
 
@@ -99,6 +105,7 @@ export const applyLeaveold2oct = asyncHandler(async (req, res) => {
   // ----------------------------------------------------------
 
   const leave = await Leave.create({
+    tenantId: req.tenantId,
     userId: user._id,
     leaveType,
     startDate: start,
@@ -149,7 +156,11 @@ export const applyLeave7oct = asyncHandler(async (req, res) => {
     prescription = {
       originalName: req.file.originalname,
       fileName: req.file.filename,
-      path: req.file.path,
+      path: getTenantUploadStoredPath(
+        req.tenantId,
+        "prescriptions",
+        req.file.filename,
+      ),
       mimetype: req.file.mimetype,
       size: req.file.size,
     };
@@ -188,7 +199,10 @@ export const applyLeave7oct = asyncHandler(async (req, res) => {
   // Find user
   // ----------------------------------------------------------
 
-  const user = await User.findById(req.user._id);
+  const user = await User.findOne({
+    _id: req.user._id,
+    tenantId: req.tenantId,
+  });
 
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -213,6 +227,7 @@ export const applyLeave7oct = asyncHandler(async (req, res) => {
   // ----------------------------------------------------------
 
   const overlapping = await Leave.findOne({
+    tenantId: req.tenantId,
     userId: user._id,
     status: { $in: ["pending", "approved"] },
     $or: [
@@ -251,6 +266,7 @@ export const applyLeave7oct = asyncHandler(async (req, res) => {
   // ----------------------------------------------------------
 
   const leave = await Leave.create({
+    tenantId: req.tenantId,
     userId: user._id,
     leaveType,
     startDate: start,
@@ -313,7 +329,10 @@ export const applyLeave = asyncHandler(async (req, res) => {
   }
 
   // Check user balance and deduct atomically
-  const user = await User.findById(req.user._id);
+  const user = await User.findOne({
+    _id: req.user._id,
+    tenantId: req.tenantId,
+  });
   if (leaveType !== "lwp") {
     const currentBalance = user.leaveBalance?.[leaveType] || 0;
     if (currentBalance < daysCount) {
@@ -324,17 +343,28 @@ export const applyLeave = asyncHandler(async (req, res) => {
     }
 
     // Atomically deduct 0.5 (or N days)
-    await User.findByIdAndUpdate(req.user._id, {
-      $inc: { [`leaveBalance.${leaveType}`]: -daysCount },
-    });
+    await User.findOneAndUpdate(
+      { _id: req.user._id, tenantId: req.tenantId },
+      { $inc: { [`leaveBalance.${leaveType}`]: -daysCount } },
+    );
   }
 
-  let prescriptionUrl = "";
-  if (req.file) {
-    prescriptionUrl = `/uploads/${req.file.filename}`;
-  }
+  const prescription = req.file
+    ? {
+        originalName: req.file.originalname,
+        fileName: req.file.filename,
+        path: getTenantUploadStoredPath(
+          req.tenantId,
+          "prescriptions",
+          req.file.filename,
+        ),
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+      }
+    : undefined;
 
   const newLeave = await Leave.create({
+    tenantId: req.tenantId,
     userId: req.user._id,
     leaveType,
     startDate: start,
@@ -343,7 +373,7 @@ export const applyLeave = asyncHandler(async (req, res) => {
     reason,
     isHalfDay: isHalf,
     halfDaySession: isHalf ? halfDaySession : null,
-    prescriptionUrl,
+    prescription,
     status: "pending",
   });
 
@@ -373,7 +403,16 @@ export const reviewLeave = asyncHandler(async (req, res) => {
     );
   }
 
-  const leave = await Leave.findById(id);
+  let leaveFilter = { _id: id, tenantId: req.tenantId };
+  if (req.user.role === ROLES.MANAGER) {
+    const reportees = await User.find({
+      tenantId: req.tenantId,
+      reportingManager: req.user._id,
+    }).select("_id");
+    leaveFilter.userId = { $in: reportees.map((user) => user._id) };
+  }
+
+  const leave = await Leave.findOne(leaveFilter);
 
   if (!leave) {
     throw new ApiError(404, "Leave application not found");
@@ -386,7 +425,10 @@ export const reviewLeave = asyncHandler(async (req, res) => {
     );
   }
 
-  const applicant = await User.findById(leave.userId);
+  const applicant = await User.findOne({
+    _id: leave.userId,
+    tenantId: req.tenantId,
+  });
 
   if (!applicant) {
     throw new ApiError(404, "Applicant user record not found");
@@ -448,6 +490,7 @@ export const cancelLeave = asyncHandler(async (req, res) => {
 
   const leave = await Leave.findOne({
     _id: id,
+    tenantId: req.tenantId,
     userId: req.user._id,
   });
 
@@ -459,7 +502,10 @@ export const cancelLeave = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Only pending leave applications can be cancelled");
   }
 
-  const user = await User.findById(req.user._id);
+  const user = await User.findOne({
+    _id: req.user._id,
+    tenantId: req.tenantId,
+  });
 
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -524,6 +570,7 @@ export const getMyLeaves = asyncHandler(async (req, res) => {
 
   const [leaves, total] = await Promise.all([
     Leave.find({
+      tenantId: req.tenantId,
       userId: req.user._id,
     })
       .sort({ createdAt: -1 })
@@ -531,6 +578,7 @@ export const getMyLeaves = asyncHandler(async (req, res) => {
       .limit(limit),
 
     Leave.countDocuments({
+      tenantId: req.tenantId,
       userId: req.user._id,
     }),
   ]);
@@ -564,14 +612,27 @@ export const getTeamLeaves = asyncHandler(async (req, res) => {
 
   const skip = (page - 1) * limit;
 
+  let filter = { tenantId: req.tenantId };
+  if (req.user.role === ROLES.MANAGER) {
+    const reportees = await User.find({
+      tenantId: req.tenantId,
+      reportingManager: req.user._id,
+    }).select("_id");
+    filter.userId = { $in: reportees.map((user) => user._id) };
+  }
+
   const [leaves, total] = await Promise.all([
-    Leave.find()
-      .populate("userId", "name email role")
+    Leave.find(filter)
+      .populate({
+        path: "userId",
+        select: "name email role",
+        match: { tenantId: req.tenantId },
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
 
-    Leave.countDocuments(),
+    Leave.countDocuments(filter),
   ]);
 
   return ApiResponse.send(

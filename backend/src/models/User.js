@@ -1,17 +1,23 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { ROLES } from "../constants/roles.js";
+import { tenantQueryGuard } from "../plugins/tenantQueryGuard.js";
 const crypto = await import("crypto");
 
 const userSchema = new mongoose.Schema(
   {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      immutable: true,
+      index: true,
+    },
     employeeId: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       uppercase: true,
-      index: true,
     },
     name: {
       type: String,
@@ -23,7 +29,6 @@ const userSchema = new mongoose.Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -80,6 +85,10 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     isActive: { type: Boolean, default: true }, // Status flag
+    lastLoginAt: { type: Date, default: null },
+    emailVerified: { type: Boolean, default: true },
+    emailVerificationToken: { type: String, default: null, select: false },
+    emailVerificationExpires: { type: Date, default: null, select: false },
     leaveBalance: {
       casual: { type: Number, default: 10, min: 0 },
       sick: { type: Number, default: 8, min: 0 },
@@ -107,6 +116,12 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
+userSchema.index({ tenantId: 1, employeeId: 1 }, { unique: true });
+userSchema.index({ tenantId: 1, role: 1, department: 1 });
+userSchema.index({ tenantId: 1, role: 1, joinDate: 1, isActive: 1 });
+tenantQueryGuard(userSchema);
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return;

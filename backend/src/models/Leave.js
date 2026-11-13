@@ -1,7 +1,15 @@
 import mongoose from "mongoose";
+import { tenantQueryGuard } from "../plugins/tenantQueryGuard.js";
 
 const leaveSchema = new mongoose.Schema(
   {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      immutable: true,
+      index: true,
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -74,5 +82,10 @@ const leaveSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+leaveSchema.index({ tenantId: 1, status: 1, startDate: 1, endDate: 1 });
+leaveSchema.index({ tenantId: 1, status: 1, updatedAt: 1 });
+leaveSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+tenantQueryGuard(leaveSchema);
 
 export const Leave = mongoose.model("Leave", leaveSchema);

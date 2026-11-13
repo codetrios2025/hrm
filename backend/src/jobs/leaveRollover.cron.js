@@ -1,5 +1,8 @@
 import cron from "node-cron";
 import { User } from "../models/User.js";
+import Tenant from "../models/Tenant.js";
+import { getTenantId, runWithTenant } from "../utils/tenantContext.js";
+import { DEFAULT_LEAVE_POLICY } from "../config/leavePolicy.js";
 
 /**
  * Year-End Leave Rollover Job
@@ -20,31 +23,46 @@ export const initLeaveRolloverCron = () => {
       );
 
       try {
-        const staffUsers = await User.find({ isActive: true });
-        let processedCount = 0;
+        const activeTenants = await Tenant.find({ status: "active" })
+          .select("_id leavePolicy.oh")
+          .lean();
 
-        for (const user of staffUsers) {
-          const currentOH = user.leaveBalance?.oh || 0;
-          const currentPaid = user.leaveBalance?.paid || 0;
+        for (const tenant of activeTenants) {
+          try {
+            await runWithTenant(tenant._id, async () => {
+              const tenantId = getTenantId();
+              const staffUsers = await User.find({
+                tenantId,
+                isActive: true,
+              });
+              let processedCount = 0;
 
-          // 1. Casual Leave becomes 0
-          user.leaveBalance.casual = 0;
+              for (const user of staffUsers) {
+                const currentOH = user.leaveBalance?.oh || 0;
+                const currentPaid = user.leaveBalance?.paid || 0;
 
-          // 2. Leftover OH converts into Paid Leave
-          if (currentOH > 0) {
-            user.leaveBalance.paid = currentPaid + currentOH;
+                user.leaveBalance.casual = 0;
+                if (currentOH > 0) {
+                  user.leaveBalance.paid = currentPaid + currentOH;
+                }
+                user.leaveBalance.oh =
+                  tenant.leavePolicy?.oh ?? DEFAULT_LEAVE_POLICY.oh;
+
+                await user.save();
+                processedCount++;
+              }
+
+              console.log(
+                `[Year-End Rollover] Tenant ${tenantId}: processed ${processedCount} employees. CL reset to 0; remaining OH converted to Paid Leave.`,
+              );
+            });
+          } catch (err) {
+            console.error(
+              `[Year-End Rollover Error] Tenant ${tenant._id}:`,
+              err.message,
+            );
           }
-
-          // 3. Reset OH for upcoming new year (default quota 2)
-          user.leaveBalance.oh = 2;
-
-          await user.save();
-          processedCount++;
         }
-
-        console.log(
-          `[Year-End Rollover] Successfully processed leave rollover for ${processedCount} employees. CL reset to 0; remaining OH converted to Paid Leave.`,
-        );
       } catch (err) {
         console.error("[Year-End Rollover Error]:", err.message);
       }

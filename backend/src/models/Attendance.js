@@ -1,7 +1,15 @@
 import mongoose from "mongoose";
+import { tenantQueryGuard } from "../plugins/tenantQueryGuard.js";
 
 const attendanceSchema = new mongoose.Schema(
   {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      immutable: true,
+      index: true,
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -25,7 +33,12 @@ const attendanceSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Prevent multiple records for the same employee on the same date
-attendanceSchema.index({ userId: 1, date: 1 }, { unique: true });
+// Prevent multiple records for the same employee on the same date per tenant
+attendanceSchema.index(
+  { tenantId: 1, userId: 1, date: 1 },
+  { unique: true },
+);
+attendanceSchema.index({ tenantId: 1, date: 1, userId: 1, status: 1 });
+tenantQueryGuard(attendanceSchema);
 
 export const Attendance = mongoose.model("Attendance", attendanceSchema);

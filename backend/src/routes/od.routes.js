@@ -6,13 +6,14 @@ import {
   reviewOutdoorDuty,
 } from "../controllers/od.controller.js";
 import { authenticate, authorize } from "../middlewares/auth.middleware.js";
+import { checkPlanLimit } from "../middlewares/checkPlanLimit.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { applyODSchema, reviewODSchema } from "../validations/od.validation.js";
 import { ROLES } from "../constants/roles.js";
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate, checkPlanLimit());
 
 // ---------------- Employee Routes ----------------
 router.post("/", applyOutdoorDuty);

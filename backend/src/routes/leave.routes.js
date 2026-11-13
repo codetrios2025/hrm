@@ -7,6 +7,7 @@ import {
   cancelLeave,
 } from "../controllers/leave.controller.js";
 import { authenticate, authorize } from "../middlewares/auth.middleware.js";
+import { checkPlanLimit } from "../middlewares/checkPlanLimit.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import {
   applyLeaveSchema,
@@ -17,7 +18,7 @@ import uploadPrescription from "../middlewares/uploadPrescription.js";
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate, checkPlanLimit());
 
 // Employee routes
 router.post(

@@ -3,7 +3,10 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import fs from "fs";
-import path from "path";
+import {
+  getTenantUploadFilePath,
+  getTenantUploadStoredPath,
+} from "../utils/uploadPaths.js";
 
 // Fetch single profile (user fetches own, admin can pass ?userId=...)
 export const getProfile = asyncHandler(async (req, res) => {
@@ -12,7 +15,10 @@ export const getProfile = asyncHandler(async (req, res) => {
       ? req.query.userId
       : req.user._id;
 
-  const profile = await User.findById(targetUserId).select("-password");
+  const profile = await User.findOne({
+    _id: targetUserId,
+    tenantId: req.tenantId,
+  }).select("-password");
   if (!profile) {
     throw new ApiError(404, "User not found");
   }
@@ -27,7 +33,10 @@ export const updateProfileold = asyncHandler(async (req, res) => {
       ? req.body.userId
       : req.user._id;
 
-  const user = await User.findById(targetUserId);
+  const user = await User.findOne({
+    _id: targetUserId,
+    tenantId: req.tenantId,
+  });
   if (!user) {
     throw new ApiError(404, "User not found");
   }
@@ -90,7 +99,10 @@ export const updateProfileold = asyncHandler(async (req, res) => {
   }
 
   await user.save();
-  const updatedUser = await User.findById(user._id).select("-password");
+  const updatedUser = await User.findOne({
+    _id: user._id,
+    tenantId: req.tenantId,
+  }).select("-password");
 
   return ApiResponse.send(
     res,
@@ -106,7 +118,10 @@ export const updateProfile = asyncHandler(async (req, res) => {
       ? req.body.userId
       : req.user._id;
 
-  const user = await User.findById(targetUserId);
+  const user = await User.findOne({
+    _id: targetUserId,
+    tenantId: req.tenantId,
+  });
   if (!user) {
     throw new ApiError(404, "User not found");
   }
@@ -168,7 +183,10 @@ export const updateProfile = asyncHandler(async (req, res) => {
   }
 
   await user.save();
-  const updatedUser = await User.findById(user._id).select("-password");
+  const updatedUser = await User.findOne({
+    _id: user._id,
+    tenantId: req.tenantId,
+  }).select("-password");
 
   return ApiResponse.send(
     res,
@@ -190,7 +208,10 @@ export const uploadEmployeeDocument = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Document title is required");
   }
 
-  const user = await User.findById(userId);
+  const user = await User.findOne({
+    _id: userId,
+    tenantId: req.tenantId,
+  });
   if (!user) {
     throw new ApiError(404, "Employee not found");
   }
@@ -199,7 +220,11 @@ export const uploadEmployeeDocument = asyncHandler(async (req, res) => {
     title,
     fileName: req.file.filename,
     originalName: req.file.originalname,
-    path: `/uploads/documents/${req.file.filename}`,
+    path: getTenantUploadStoredPath(
+      req.tenantId,
+      "documents",
+      req.file.filename,
+    ),
     mimetype: req.file.mimetype,
     size: req.file.size,
   };
@@ -219,7 +244,10 @@ export const uploadEmployeeDocument = asyncHandler(async (req, res) => {
 export const deleteEmployeeDocument = asyncHandler(async (req, res) => {
   const { userId, docId } = req.params;
 
-  const user = await User.findById(userId);
+  const user = await User.findOne({
+    _id: userId,
+    tenantId: req.tenantId,
+  });
   if (!user) {
     throw new ApiError(404, "Employee not found");
   }
@@ -230,7 +258,11 @@ export const deleteEmployeeDocument = asyncHandler(async (req, res) => {
   }
 
   // Remove file from disk if exists
-  const filePath = path.join(process.cwd(), doc.path);
+  const filePath = getTenantUploadFilePath(
+    req.tenantId,
+    "documents",
+    doc.fileName,
+  );
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }

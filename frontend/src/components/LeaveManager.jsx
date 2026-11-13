@@ -16,11 +16,6 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import Pagination from "./Pagination";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-
-const SERVER_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
-
 const getPrescriptionFileName = (prescription) => {
   if (!prescription) {
     return null;
@@ -86,9 +81,7 @@ const getPrescriptionUrl = (prescription) => {
     return null;
   }
 
-  return `${SERVER_BASE_URL}/uploads/prescriptions/${encodeURIComponent(
-    fileName,
-  )}`;
+  return `/uploads/prescriptions/${encodeURIComponent(fileName)}`;
 };
 
 const getPrescriptionDownloadName = (prescription) => {
@@ -518,7 +511,7 @@ export default function LeaveManager() {
     }
   };
 
-  const handlePreviewPrescription = (prescription) => {
+  const handlePreviewPrescription = async (prescription) => {
     const url = getPrescriptionUrl(prescription);
 
     if (!url) {
@@ -526,7 +519,27 @@ export default function LeaveManager() {
       return;
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (/^https?:\/\//i.test(url)) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      showError("Allow pop-ups to preview this prescription.");
+      return;
+    }
+
+    try {
+      const blob = await api.get(url, { responseType: "blob" });
+      const blobUrl = window.URL.createObjectURL(blob);
+      previewWindow.opener = null;
+      previewWindow.location.href = blobUrl;
+      window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+    } catch (err) {
+      previewWindow.close();
+      showError(err?.message || "Unable to preview prescription");
+    }
   };
 
   const handleDownloadPrescription = async (prescription) => {
@@ -538,17 +551,19 @@ export default function LeaveManager() {
     }
 
     try {
-      const response = await fetch(url, {
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Unable to download prescription. Server returned ${response.status}.`,
-        );
+      let blob;
+      if (/^https?:\/\//i.test(url)) {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(
+            `Unable to download prescription. Server returned ${response.status}.`,
+          );
+        }
+        blob = await response.blob();
+      } else {
+        blob = await api.get(url, { responseType: "blob" });
       }
 
-      const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
 
@@ -557,7 +572,7 @@ export default function LeaveManager() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(blobUrl);
+      window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (err) {
       console.error("Prescription download error:", err);
       showError(err?.message || "Unable to download prescription");
@@ -917,6 +932,7 @@ export default function LeaveManager() {
             ) : (
               leaves.map((leave) => {
                 const prescriptionUrl = getPrescriptionUrl(leave.prescription);
+                const canViewPrescription = user?.role === "admin";
 
                 return (
                   <tr
@@ -986,7 +1002,9 @@ export default function LeaveManager() {
 
                     {isApprover && (
                       <td className="py-2.5">
-                        {leave.leaveType === "sick" && prescriptionUrl ? (
+                        {leave.leaveType === "sick" &&
+                        prescriptionUrl &&
+                        canViewPrescription ? (
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
@@ -1012,6 +1030,10 @@ export default function LeaveManager() {
                               Download
                             </button>
                           </div>
+                        ) : leave.leaveType === "sick" && prescriptionUrl ? (
+                          <span className="text-[10px] text-slate-400">
+                            Restricted
+                          </span>
                         ) : leave.leaveType === "sick" ? (
                           <span className="text-[10px] text-slate-400">
                             Not available

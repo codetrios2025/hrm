@@ -1,5 +1,7 @@
 import cron from "node-cron";
 import { Attendance } from "../models/Attendance.js";
+import Tenant from "../models/Tenant.js";
+import { getTenantId, runWithTenant } from "../utils/tenantContext.js";
 
 // Runs every night at 23:59 (11:59 PM)
 export const initAttendanceCron = () => {
@@ -9,40 +11,53 @@ export const initAttendanceCron = () => {
     );
 
     try {
-      // Find all shifts still marked as in-progress
-      const unclosedLogs = await Attendance.find({
-        status: "in-progress",
-        clockOut: null,
-      });
+      const activeTenants = await Tenant.find({ status: "active" })
+        .select("_id")
+        .lean();
 
-      for (const log of unclosedLogs) {
-        // Fallback to last recorded heartbeat timestamp, or clockIn if no heartbeats were received
-        const outTime = log.lastActiveAt || log.clockIn;
-        log.clockOut = outTime;
+      for (const tenant of activeTenants) {
+        try {
+          await runWithTenant(tenant._id, async () => {
+            const tenantId = getTenantId();
+            const unclosedLogs = await Attendance.find({
+              tenantId,
+              status: "in-progress",
+              clockOut: null,
+            });
 
-        // Calculate hours based on verified active minutes
-        const activeHours = parseFloat(
-          ((log.activeMinutes || 5) / 60).toFixed(2),
-        );
-        log.totalHours = activeHours;
+            for (const log of unclosedLogs) {
+              const outTime = log.lastActiveAt || log.clockIn;
+              log.clockOut = outTime;
 
-        // Apply hour status rules
-        if (activeHours >= 9) {
-          log.status = "present";
-        } else if (activeHours >= 7 && activeHours < 9) {
-          log.status = "short-leave";
-        } else if (activeHours >= 5 && activeHours < 7) {
-          log.status = "half-day";
-        } else {
-          log.status = "absent";
+              const activeHours = parseFloat(
+                ((log.activeMinutes || 5) / 60).toFixed(2),
+              );
+              log.totalHours = activeHours;
+
+              if (activeHours >= 9) {
+                log.status = "present";
+              } else if (activeHours >= 7 && activeHours < 9) {
+                log.status = "short-leave";
+              } else if (activeHours >= 5 && activeHours < 7) {
+                log.status = "half-day";
+              } else {
+                log.status = "absent";
+              }
+
+              await log.save();
+            }
+
+            console.log(
+              `[Cron Job] Completed auto-punchout for tenant ${tenantId}: ${unclosedLogs.length} shifts.`,
+            );
+          });
+        } catch (err) {
+          console.error(
+            `[Cron Job Error] Tenant ${tenant._id}:`,
+            err.message,
+          );
         }
-
-        await log.save();
       }
-
-      console.log(
-        `[Cron Job] Completed auto-punchout for ${unclosedLogs.length} shifts.`,
-      );
     } catch (err) {
       console.error("[Cron Job Error]", err.message);
     }

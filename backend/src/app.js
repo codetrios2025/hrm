@@ -5,10 +5,12 @@ import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import routes from "./routes/index.js";
+import routes, { SUPER_ADMIN_API_PREFIX } from "./routes/index.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
 import { ApiError } from "./utils/ApiError.js";
 import { ENV } from "./config/env.js";
+import { handleRazorpayWebhook } from "./controllers/billing.controller.js";
+import superAdminRoutes from "./routes/superAdmin.routes.js";
 
 const app = express();
 
@@ -39,12 +41,7 @@ const __dirname = path.dirname(__filename);
 
 const frontendPath = path.join(__dirname, "../../frontend/dist");
 
-// IMPORTANT:
-// src -> ../uploads = backend/uploads
-const uploadsPath = path.join(__dirname, "../uploads");
-
 console.log("Frontend path:", frontendPath);
-console.log("Uploads path:", uploadsPath);
 
 /*
 |--------------------------------------------------------------------------
@@ -112,6 +109,12 @@ const limiter = rateLimit({
 
 app.use("/api", limiter);
 
+app.post(
+  "/api/billing/webhook",
+  express.raw({ type: "application/json", limit: "1mb" }),
+  handleRazorpayWebhook,
+);
+
 /*
 |--------------------------------------------------------------------------
 | Body Parsers
@@ -127,35 +130,9 @@ app.use(
   }),
 );
 
-/*
-|--------------------------------------------------------------------------
-| IMPORTANT: Serve Uploaded Files
-|--------------------------------------------------------------------------
-|
-| Physical file:
-|
-| backend/uploads/prescriptions/abc.pdf
-|
-| Browser URL:
-|
-| http://localhost:5000/uploads/prescriptions/abc.pdf
-|
-*/
-
-app.use(
-  "/uploads",
-  express.static(uploadsPath, {
-    setHeaders: (res, filePath) => {
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-
-      // Allow PDF/images to be opened in browser
-      if (filePath.toLowerCase().endsWith(".pdf")) {
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", "inline");
-      }
-    },
-  }),
-);
+app.use("/uploads", (req, res, next) => {
+  next(new ApiError(404, "Use the authenticated file endpoint"));
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -164,6 +141,14 @@ app.use(
 */
 
 app.use(express.static(frontendPath));
+
+/*
+|--------------------------------------------------------------------------
+| Platform Super Admin API
+|--------------------------------------------------------------------------
+*/
+
+app.use(SUPER_ADMIN_API_PREFIX, superAdminRoutes);
 
 /*
 |--------------------------------------------------------------------------

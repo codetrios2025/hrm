@@ -7,12 +7,13 @@ import {
   recordHeartbeat,
 } from "../controllers/attendance.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
+import { checkPlanLimit } from "../middlewares/checkPlanLimit.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { dateQuerySchema } from "../validations/attendance.validation.js";
 
 const router = Router();
 
-router.use(authenticate);
+router.use(authenticate, checkPlanLimit());
 
 router.post("/clock-in", clockIn);
 router.post("/clock-out", clockOut);

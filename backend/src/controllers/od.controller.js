@@ -37,6 +37,7 @@ export const applyOutdoorDuty = asyncHandler(async (req, res) => {
 
   // Check if an application already exists for this date
   const existingOD = await OutdoorDuty.findOne({
+    tenantId: req.tenantId,
     userId: req.user._id,
     date,
   });
@@ -48,6 +49,7 @@ export const applyOutdoorDuty = asyncHandler(async (req, res) => {
   }
 
   const newOD = await OutdoorDuty.create({
+    tenantId: req.tenantId,
     userId: req.user._id,
     date,
     startTime,
@@ -67,7 +69,10 @@ export const applyOutdoorDuty = asyncHandler(async (req, res) => {
 
 // Get user's own OD requests
 export const getMyODRequestsold = asyncHandler(async (req, res) => {
-  const records = await OutdoorDuty.find({ userId: req.user._id })
+  const records = await OutdoorDuty.find({
+    tenantId: req.tenantId,
+    userId: req.user._id,
+  })
     .sort({ createdAt: -1 })
     .limit(30);
 
@@ -76,19 +81,28 @@ export const getMyODRequestsold = asyncHandler(async (req, res) => {
 
 // Approver view: Managers see their reportees; HR Admin sees all
 export const getPendingODRequestsold = asyncHandler(async (req, res) => {
-  let filter = {};
+  let filter = { tenantId: req.tenantId };
 
   if (req.user.role === "manager") {
     const reportees = await User.find({
+      tenantId: req.tenantId,
       reportingManager: req.user._id,
     }).select("_id");
     const reporteeIds = reportees.map((r) => r._id);
-    filter = { userId: { $in: reporteeIds } };
+    filter.userId = { $in: reporteeIds };
   }
 
   const requests = await OutdoorDuty.find(filter)
-    .populate("userId", "name email employeeId role")
-    .populate("reviewedBy", "name email")
+    .populate({
+      path: "userId",
+      select: "name email employeeId role",
+      match: { tenantId: req.tenantId },
+    })
+    .populate({
+      path: "reviewedBy",
+      select: "name email",
+      match: { tenantId: req.tenantId },
+    })
     .sort({ createdAt: -1 });
 
   return ApiResponse.send(res, 200, requests, "Pending OD requests retrieved");
@@ -103,9 +117,20 @@ export const reviewOutdoorDuty = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid status. Must be 'approved' or 'rejected'");
   }
 
-  const od = await OutdoorDuty.findById(id);
+  const od = await OutdoorDuty.findOne({
+    _id: id,
+    tenantId: req.tenantId,
+  });
   if (!od) {
     throw new ApiError(404, "Outdoor Duty record not found");
+  }
+
+  const applicant = await User.findOne({
+    _id: od.userId,
+    tenantId: req.tenantId,
+  });
+  if (!applicant) {
+    throw new ApiError(404, "Applicant user record not found");
   }
 
   if (od.status !== "pending") {
@@ -135,6 +160,7 @@ export const reviewOutdoorDuty = asyncHandler(async (req, res) => {
     const dutyMinutes = Math.round(dutyHours * 60);
 
     const existingLog = await Attendance.findOne({
+      tenantId: req.tenantId,
       userId: od.userId,
       date: od.date,
     });
@@ -152,6 +178,7 @@ export const reviewOutdoorDuty = asyncHandler(async (req, res) => {
       await existingLog.save();
     } else {
       await Attendance.create({
+        tenantId: req.tenantId,
         userId: od.userId,
         date: od.date,
         clockIn,
@@ -173,20 +200,29 @@ export const getPendingODRequests = asyncHandler(async (req, res) => {
   const limit = Math.max(1, parseInt(req.query.limit, 10) || 5);
   const skip = (page - 1) * limit;
 
-  let filter = {};
+  let filter = { tenantId: req.tenantId };
 
   if (req.user.role === "manager") {
     const reportees = await User.find({
+      tenantId: req.tenantId,
       reportingManager: req.user._id,
     }).select("_id");
     const reporteeIds = reportees.map((r) => r._id);
-    filter = { userId: { $in: reporteeIds } };
+    filter.userId = { $in: reporteeIds };
   }
 
   const [records, total] = await Promise.all([
     OutdoorDuty.find(filter)
-      .populate("userId", "name email employeeId role")
-      .populate("reviewedBy", "name email")
+      .populate({
+        path: "userId",
+        select: "name email employeeId role",
+        match: { tenantId: req.tenantId },
+      })
+      .populate({
+        path: "reviewedBy",
+        select: "name email",
+        match: { tenantId: req.tenantId },
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
@@ -215,7 +251,7 @@ export const getMyODRequests = asyncHandler(async (req, res) => {
   const limit = Math.max(1, parseInt(req.query.limit, 10) || 5);
   const skip = (page - 1) * limit;
 
-  const filter = { userId: req.user._id };
+  const filter = { tenantId: req.tenantId, userId: req.user._id };
 
   const [records, total] = await Promise.all([
     OutdoorDuty.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),

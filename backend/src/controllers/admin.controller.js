@@ -1,4 +1,5 @@
 import { User } from "../models/User.js";
+import Tenant from "../models/Tenant.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -12,6 +13,12 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
 import { sendCredentialsEmail, sendEmailWithPassword } from "../utils/email.js";
+import { DEFAULT_LEAVE_POLICY } from "../config/leavePolicy.js";
+import {
+  checkPlanLimit,
+  getEffectiveEmployeeLimit,
+} from "../utils/tenantLimits.js";
+import { PLANS } from "../config/plans.js";
 
 // ============================================================
 // SUPPORTED LEAVE TYPES
@@ -49,17 +56,7 @@ const LEAVE_TYPE_LABELS = {
 // DEFAULT LEAVE BALANCE
 // ============================================================
 
-const DEFAULT_LEAVE_BALANCE = {
-  paid: 15,
-  casual: 12,
-  sick: 8,
-  oh: 2,
-  coff: 0,
-  paternity: 0,
-  maternity: 0,
-  bereavement: 0,
-  lwp: 0,
-};
+const DEFAULT_LEAVE_BALANCE = DEFAULT_LEAVE_POLICY;
 
 // ============================================================
 // VALIDATE LEAVE TYPE
@@ -121,34 +118,34 @@ const buildLeaveBalance = ({
   paternityLeave,
   maternityLeave,
   bereavementLeave,
-} = {}) => {
+} = {}, defaults = DEFAULT_LEAVE_BALANCE) => {
   return {
     // 1. LWP
-    lwp: getNumber(lwp, DEFAULT_LEAVE_BALANCE.lwp),
+    lwp: getNumber(lwp, defaults.lwp),
 
     // 2. Casual Leave
-    casual: getNumber(casualLeave, DEFAULT_LEAVE_BALANCE.casual),
+    casual: getNumber(casualLeave, defaults.casual),
 
     // 3. Paid Leave
-    paid: getNumber(paidLeave, DEFAULT_LEAVE_BALANCE.paid),
+    paid: getNumber(paidLeave, defaults.paid),
 
     // 4. Sick Leave
-    sick: getNumber(sickLeave, DEFAULT_LEAVE_BALANCE.sick),
+    sick: getNumber(sickLeave, defaults.sick),
 
     // 5. COFF
-    coff: getNumber(coffBalance, DEFAULT_LEAVE_BALANCE.coff),
+    coff: getNumber(coffBalance, defaults.coff),
 
     // 6. Optional Holiday
-    oh: getNumber(optionalHoliday, DEFAULT_LEAVE_BALANCE.oh),
+    oh: getNumber(optionalHoliday, defaults.oh),
 
     // 7. Paternity Leave
-    paternity: getNumber(paternityLeave, DEFAULT_LEAVE_BALANCE.paternity),
+    paternity: getNumber(paternityLeave, defaults.paternity),
 
     // 8. Maternity Leave
-    maternity: getNumber(maternityLeave, DEFAULT_LEAVE_BALANCE.maternity),
+    maternity: getNumber(maternityLeave, defaults.maternity),
 
     // 9. Bereavement Leave
-    bereavement: getNumber(bereavementLeave, DEFAULT_LEAVE_BALANCE.bereavement),
+    bereavement:     getNumber(bereavementLeave, defaults.bereavement),
   };
 };
 
@@ -180,7 +177,10 @@ export const applyLeaveForEmployee = asyncHandler(async (req, res) => {
   // Find employee
   // --------------------------------------------------------
 
-  const targetUser = await User.findById(employeeId);
+  const targetUser = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  });
 
   if (!targetUser) {
     throw new ApiError(404, "Employee not found");
@@ -228,6 +228,7 @@ export const applyLeaveForEmployee = asyncHandler(async (req, res) => {
   // --------------------------------------------------------
 
   const overlapping = await Leave.findOne({
+    tenantId: req.tenantId,
     userId: targetUser._id,
 
     status: {
@@ -280,6 +281,7 @@ export const applyLeaveForEmployee = asyncHandler(async (req, res) => {
   // --------------------------------------------------------
 
   const leave = await Leave.create({
+    tenantId: req.tenantId,
     userId: targetUser._id,
 
     leaveType: normalizedLeaveType,
@@ -378,12 +380,16 @@ export const createStaffUser = asyncHandler(async (req, res) => {
   if (!["employee", "manager", "admin"].includes(normalizedRole)) {
     throw new ApiError(400, "Invalid role");
   }
+  const tenantSettings = await Tenant.findById(req.tenantId)
+    .select("leavePolicy")
+    .lean();
 
   // --------------------------------------------------------
   // Check employee ID
   // --------------------------------------------------------
 
   const existingId = await User.findOne({
+    tenantId: req.tenantId,
     employeeId: normalizedEmployeeId,
   });
 
@@ -399,6 +405,7 @@ export const createStaffUser = asyncHandler(async (req, res) => {
   // --------------------------------------------------------
 
   const existingEmail = await User.findOne({
+    tenantId: req.tenantId,
     email: normalizedEmail,
   });
 
@@ -411,7 +418,10 @@ export const createStaffUser = asyncHandler(async (req, res) => {
   // --------------------------------------------------------
 
   if (reportingManager) {
-    const manager = await User.findById(reportingManager);
+    const manager = await User.findOne({
+      _id: reportingManager,
+      tenantId: req.tenantId,
+    });
 
     if (!manager || !["manager", "admin"].includes(manager.role)) {
       throw new ApiError(400, "Reporting manager must be a Manager or Admin");
@@ -439,13 +449,14 @@ export const createStaffUser = asyncHandler(async (req, res) => {
     maternityLeave,
     bereavementLeave,
     lwp,
-  });
+  }, tenantSettings?.leavePolicy || DEFAULT_LEAVE_POLICY);
 
   // --------------------------------------------------------
   // Create user
   // --------------------------------------------------------
 
   const newUser = await User.create({
+    tenantId: req.tenantId,
     employeeId: normalizedEmployeeId,
 
     name: name.trim(),
@@ -665,6 +676,7 @@ export const bulkImportStaff22 = asyncHandler(async (req, res) => {
   const emails = Array.from(seenEmails);
 
   const existingUsers = await User.find({
+    tenantId: req.tenantId,
     $or: [
       {
         employeeId: {
@@ -678,7 +690,7 @@ export const bulkImportStaff22 = asyncHandler(async (req, res) => {
         },
       },
     ],
-  }).select("_id employeeId email role");
+  }).select("_id employeeId email role isActive");
 
   const existingByEmpId = new Map();
 
@@ -724,6 +736,7 @@ export const bulkImportStaff22 = asyncHandler(async (req, res) => {
 
   const managerUsers = managerRefs.length
     ? await User.find({
+        tenantId: req.tenantId,
         employeeId: {
           $in: managerRefs,
         },
@@ -794,6 +807,7 @@ export const bulkImportStaff22 = asyncHandler(async (req, res) => {
         reportingManager = resolved;
       } else {
         const manager = await User.findOne({
+          tenantId: req.tenantId,
           employeeId: managerRef,
         }).select("_id");
 
@@ -851,6 +865,7 @@ export const bulkImportStaff22 = asyncHandler(async (req, res) => {
       const hashedPassword = await bcrypt.hash(rawPassword, 12);
 
       const created = await User.create({
+        tenantId: req.tenantId,
         employeeId,
 
         name,
@@ -1080,6 +1095,7 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
   const emails = Array.from(seenEmails);
 
   const existingUsers = await User.find({
+    tenantId: req.tenantId,
     $or: [
       {
         employeeId: {
@@ -1137,6 +1153,7 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
 
   const managerUsers = managerRefs.length
     ? await User.find({
+        tenantId: req.tenantId,
         employeeId: {
           $in: managerRefs,
         },
@@ -1185,6 +1202,25 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
     throw new ApiError(400, `Import rejected: ${validationErrors.join(" ")}`);
   }
 
+  const tenantSettings = await Tenant.findById(req.tenantId)
+    .select("leavePolicy")
+    .lean();
+  const employeeCountDelta = validRows.reduce((delta, row) => {
+    const employeeId = row.employeeId.trim().toUpperCase();
+    const existing = existingByEmpId.get(employeeId);
+    const active = Boolean(existing) && existing.isActive !== false;
+    const oldCountsAsEmployee = active && existing.role !== "admin";
+    const newCountsAsEmployee =
+      (active || !existing) &&
+      row.role.trim().toLowerCase() !== "admin";
+    return (
+      delta +
+      Number(newCountsAsEmployee) -
+      Number(oldCountsAsEmployee)
+    );
+  }, 0);
+  await checkPlanLimit(req.tenantId, employeeCountDelta);
+
   // ========================================================
   // 8. INSERT / UPDATE
   // ========================================================
@@ -1218,6 +1254,7 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
         reportingManager = resolved;
       } else {
         const manager = await User.findOne({
+          tenantId: req.tenantId,
           employeeId: managerRef,
         }).select("_id");
 
@@ -1249,7 +1286,7 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
       maternityLeave: row.maternityLeave,
 
       bereavementLeave: row.bereavementLeave,
-    });
+    }, tenantSettings?.leavePolicy || DEFAULT_LEAVE_POLICY);
 
     // ======================================================
     // EXISTING EMPLOYEE
@@ -1289,6 +1326,7 @@ export const bulkImportStaff = asyncHandler(async (req, res) => {
     const hashedPassword = await bcrypt.hash(rawPassword, 12);
 
     const created = await User.create({
+      tenantId: req.tenantId,
       employeeId,
 
       name,
@@ -1376,6 +1414,7 @@ export const updateStaffDetails = asyncHandler(async (req, res) => {
   }
 
   const existingEmail = await User.findOne({
+    tenantId: req.tenantId,
     email: normalizedEmail,
     _id: {
       $ne: employeeId,
@@ -1394,8 +1433,8 @@ export const updateStaffDetails = asyncHandler(async (req, res) => {
     throw new ApiError(400, "You cannot demote your own Admin account");
   }
 
-  const updatedStaff = await User.findByIdAndUpdate(
-    employeeId,
+  const updatedStaff = await User.findOneAndUpdate(
+    { _id: employeeId, tenantId: req.tenantId },
     {
       name: name.trim(),
       email: normalizedEmail,
@@ -1430,7 +1469,10 @@ export const toggleStaffStatus = asyncHandler(async (req, res) => {
     throw new ApiError(400, "You cannot deactivate your own Admin account");
   }
 
-  const targetUser = await User.findById(employeeId);
+  const targetUser = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  });
 
   if (!targetUser) {
     throw new ApiError(404, "Staff member not found");
@@ -1462,8 +1504,12 @@ export const getAllStaff = asyncHandler(async (req, res) => {
   const skip = (page - 1) * limit;
 
   const [staff, total, managers] = await Promise.all([
-    User.find()
-      .populate("reportingManager", "name email role employeeId")
+    User.find({ tenantId: req.tenantId })
+      .populate({
+        path: "reportingManager",
+        select: "name email role employeeId",
+        match: { tenantId: req.tenantId },
+      })
       .select("-password")
       .sort({
         createdAt: -1,
@@ -1471,9 +1517,10 @@ export const getAllStaff = asyncHandler(async (req, res) => {
       .skip(skip)
       .limit(limit),
 
-    User.countDocuments(),
+    User.countDocuments({ tenantId: req.tenantId }),
 
     User.find({
+      tenantId: req.tenantId,
       role: {
         $in: ["manager", "admin"],
       },
@@ -1500,6 +1547,48 @@ export const getAllStaff = asyncHandler(async (req, res) => {
   );
 });
 
+export const getTenantUsage = asyncHandler(async (req, res) => {
+  const tenant = await Tenant.findById(req.tenantId)
+    .select(
+      "plan employeeLimitOverride status trialEndsAt billing.status billing.currentPeriodEnd",
+    )
+    .lean();
+  if (!tenant) throw new ApiError(404, "Tenant not found");
+
+  const employeeCount = await User.countDocuments({
+    tenantId: req.tenantId,
+    role: { $ne: "admin" },
+    isActive: { $ne: false },
+  });
+  return ApiResponse.send(
+    res,
+    200,
+    {
+      employeeCount,
+      plan: tenant.plan,
+      planLabel: PLANS[tenant.plan].label,
+      modules: PLANS[tenant.plan].modules,
+      planEmployeeLimit: PLANS[tenant.plan].employeeLimit,
+      employeeLimitOverride: tenant.employeeLimitOverride ?? null,
+      effectiveEmployeeLimit: getEffectiveEmployeeLimit(tenant),
+      trialEndsAt: tenant.trialEndsAt,
+      trialDaysLeft:
+        tenant.status === "trial" && tenant.trialEndsAt
+          ? Math.max(
+              0,
+              Math.ceil(
+                (new Date(tenant.trialEndsAt).getTime() - Date.now()) /
+                  (24 * 60 * 60 * 1000),
+              ),
+            )
+          : null,
+      tenantStatus: tenant.status,
+      billingStatus: tenant.billing?.status || "inactive",
+    },
+    "Tenant usage retrieved",
+  );
+});
+
 // ============================================================
 // 7. ASSIGN MANAGER
 // ============================================================
@@ -1515,7 +1604,10 @@ export const assignManager = asyncHandler(async (req, res) => {
   }
 
   if (managerId) {
-    const manager = await User.findById(managerId);
+    const manager = await User.findOne({
+      _id: managerId,
+      tenantId: req.tenantId,
+    });
 
     if (!manager || !["manager", "admin"].includes(manager.role)) {
       throw new ApiError(
@@ -1525,15 +1617,19 @@ export const assignManager = asyncHandler(async (req, res) => {
     }
   }
 
-  const updatedUser = await User.findByIdAndUpdate(
-    employeeId,
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: employeeId, tenantId: req.tenantId },
     {
       reportingManager: managerId || null,
     },
     {
       new: true,
     },
-  ).populate("reportingManager", "name email role employeeId");
+  ).populate({
+    path: "reportingManager",
+    select: "name email role employeeId",
+    match: { tenantId: req.tenantId },
+  });
 
   if (!updatedUser) {
     throw new ApiError(404, "Employee not found");
@@ -1590,7 +1686,10 @@ export const updateLeaveBalance = asyncHandler(async (req, res) => {
   // Find employee
   // --------------------------------------------------------
 
-  const employee = await User.findById(employeeId);
+  const employee = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  });
 
   if (!employee) {
     throw new ApiError(404, "Employee not found");
@@ -1630,7 +1729,7 @@ export const updateLeaveBalanceold = updateLeaveBalance;
 export const exportAttendanceReport = asyncHandler(async (req, res) => {
   const { employeeId, month, year } = req.query;
 
-  const filter = {};
+  const filter = { tenantId: req.tenantId };
 
   if (employeeId && employeeId !== "all") {
     filter.userId = employeeId;
@@ -1649,7 +1748,11 @@ export const exportAttendanceReport = asyncHandler(async (req, res) => {
   }
 
   const records = await Attendance.find(filter)
-    .populate("userId", "name email role employeeId")
+    .populate({
+      path: "userId",
+      select: "name email role employeeId",
+      match: { tenantId: req.tenantId },
+    })
     .sort({
       date: -1,
     });
@@ -1720,6 +1823,7 @@ export const getLeaveHistoryReport = asyncHandler(async (req, res) => {
   // --------------------------------------------------------
 
   const filter = {
+    tenantId: req.tenantId,
     status: "approved",
   };
 
@@ -1793,8 +1897,16 @@ export const getLeaveHistoryReport = asyncHandler(async (req, res) => {
 
   const [records, total] = await Promise.all([
     Leave.find(filter)
-      .populate("userId", "name email employeeId role")
-      .populate("reviewedBy", "name email")
+      .populate({
+        path: "userId",
+        select: "name email employeeId role",
+        match: { tenantId: req.tenantId },
+      })
+      .populate({
+        path: "reviewedBy",
+        select: "name email",
+        match: { tenantId: req.tenantId },
+      })
       .sort({
         startDate: -1,
       })
@@ -1907,6 +2019,7 @@ export const getLeaveHistoryReportold = getLeaveHistoryReport;
 
 export const triggerYearEndRollover = asyncHandler(async (req, res) => {
   const staffUsers = await User.find({
+    tenantId: req.tenantId,
     isActive: true,
   });
 
@@ -2000,7 +2113,10 @@ export const directMarkAttendance = asyncHandler(async (req, res) => {
     );
   }
 
-  const user = await User.findById(employeeId);
+  const user = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  });
 
   if (!user) {
     throw new ApiError(404, "Employee not found");
@@ -2037,10 +2153,12 @@ export const directMarkAttendance = asyncHandler(async (req, res) => {
   const attendance = await Attendance.findOneAndUpdate(
     {
       userId: user._id,
+      tenantId: req.tenantId,
       date,
     },
 
     {
+      tenantId: req.tenantId,
       userId: user._id,
 
       date,
@@ -2098,6 +2216,7 @@ export const getTodayEmployeeAttendance = asyncHandler(async (req, res) => {
   // ------------------------------------------------------------
 
   const employees = await User.find({
+    tenantId: req.tenantId,
     role: {
       $in: ["employee", "manager", "admin"],
     },
@@ -2116,6 +2235,7 @@ export const getTodayEmployeeAttendance = asyncHandler(async (req, res) => {
   // ------------------------------------------------------------
 
   const attendanceRecords = await Attendance.find({
+    tenantId: req.tenantId,
     date: today,
     userId: {
       $in: employees.map((employee) => employee._id),
@@ -2211,7 +2331,10 @@ export const getEmployeeAttendanceHistory = asyncHandler(async (req, res) => {
   // Find employee
   // ----------------------------------------------------------
 
-  const employee = await User.findById(employeeId)
+  const employee = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  })
     .select("_id employeeId name email role isActive")
     .lean();
 
@@ -2224,6 +2347,7 @@ export const getEmployeeAttendanceHistory = asyncHandler(async (req, res) => {
   // ----------------------------------------------------------
 
   const query = {
+    tenantId: req.tenantId,
     userId: employee._id,
   };
 
@@ -2298,7 +2422,7 @@ export const grantLeaveToAll91026 = asyncHandler(async (req, res) => {
   // Update leave balance for all active employees and managers
   const updateField = `leaveBalance.${leaveType}`;
   const result = await User.updateMany(
-    { isActive: { $ne: false } },
+    { tenantId: req.tenantId, isActive: { $ne: false } },
     { $inc: { [updateField]: daysToAdd } },
   );
 
@@ -2322,6 +2446,7 @@ export const exportLeaveHistoryReportold = asyncHandler(async (req, res) => {
   // Base query
   // --------------------------------------------------
   const query = {
+    tenantId: req.tenantId,
     status: "approved",
   };
 
@@ -2366,8 +2491,16 @@ export const exportLeaveHistoryReportold = asyncHandler(async (req, res) => {
   // Fetch approved leaves
   // --------------------------------------------------
   const leaves = await Leave.find(query)
-    .populate("userId", "employeeId name email")
-    .populate("reviewedBy", "name")
+    .populate({
+      path: "userId",
+      select: "employeeId name email",
+      match: { tenantId: req.tenantId },
+    })
+    .populate({
+      path: "reviewedBy",
+      select: "name",
+      match: { tenantId: req.tenantId },
+    })
     .sort({
       startDate: 1,
     });
@@ -2582,6 +2715,7 @@ export const exportLeaveHistoryReport = asyncHandler(async (req, res) => {
   // ============================================================
 
   const leaveQuery = {
+    tenantId: req.tenantId,
     status: "approved",
   };
 
@@ -2632,7 +2766,7 @@ export const exportLeaveHistoryReport = asyncHandler(async (req, res) => {
   //
   // ============================================================
 
-  const employeeQuery = {};
+  const employeeQuery = { tenantId: req.tenantId };
 
   // ------------------------------------------------------------
   // Specific employee
@@ -2669,8 +2803,16 @@ export const exportLeaveHistoryReport = asyncHandler(async (req, res) => {
   // ============================================================
 
   const leaves = await Leave.find(leaveQuery)
-    .populate("userId", "employeeId name email")
-    .populate("reviewedBy", "name")
+    .populate({
+      path: "userId",
+      select: "employeeId name email",
+      match: { tenantId: req.tenantId },
+    })
+    .populate({
+      path: "reviewedBy",
+      select: "name",
+      match: { tenantId: req.tenantId },
+    })
     .sort({
       startDate: 1,
     })
@@ -3035,7 +3177,10 @@ export const resetEmployeePassword = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Employee ID is required");
   }
 
-  const user = await User.findById(employeeId);
+  const user = await User.findOne({
+    _id: employeeId,
+    tenantId: req.tenantId,
+  });
   if (!user) {
     throw new ApiError(404, "Employee record not found");
   }
@@ -3087,8 +3232,8 @@ export const grantLeaveToAll = asyncHandler(async (req, res) => {
 
   if (targetType === "individual" && userId) {
     // Credit to single employee
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId, tenantId: req.tenantId },
       { $inc: { [updateField]: daysToAdd } },
       { new: true },
     );
@@ -3099,7 +3244,7 @@ export const grantLeaveToAll = asyncHandler(async (req, res) => {
   } else {
     // Credit to all active employees
     const result = await User.updateMany(
-      { isActive: { $ne: false } },
+      { tenantId: req.tenantId, isActive: { $ne: false } },
       { $inc: { [updateField]: daysToAdd } },
     );
     message = `Successfully credited ${daysToAdd} day(s) of ${leaveType.toUpperCase()} Leave to ${result.modifiedCount} active staff member(s).`;

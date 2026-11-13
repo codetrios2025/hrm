@@ -1,18 +1,14 @@
 import multer from "multer";
 import path from "path";
-import fs from "fs";
-
-const uploadDir = path.resolve("uploads/prescriptions");
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, {
-    recursive: true,
-  });
-}
+import { ensureTenantUploadDirectory } from "../utils/uploadPaths.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    try {
+      cb(null, ensureTenantUploadDirectory(req.tenantId, "prescriptions"));
+    } catch (error) {
+      cb(error);
+    }
   },
 
   filename: (req, file, cb) => {

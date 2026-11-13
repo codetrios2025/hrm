@@ -191,6 +191,33 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
     }
   };
 
+  const handleViewDocument = async (doc) => {
+    if (!doc.fileName) {
+      showError("Document file is not available.");
+      return;
+    }
+
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      showError("Allow pop-ups to view this document.");
+      return;
+    }
+
+    try {
+      const blob = await api.get(
+        `/uploads/documents/${encodeURIComponent(doc.fileName)}`,
+        { responseType: "blob" },
+      );
+      const blobUrl = window.URL.createObjectURL(blob);
+      previewWindow.opener = null;
+      previewWindow.location.href = blobUrl;
+      window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+    } catch (err) {
+      previewWindow.close();
+      showError(err.message || "Failed to open document");
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -769,14 +796,13 @@ export default function EmployeeProfileModal({ userId, onClose, onUpdated }) {
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            <a
-                              href={`${import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, "") || "http://localhost:5000"}${doc.path}`}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => handleViewDocument(doc)}
                               className="px-2.5 py-1 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded font-semibold transition"
                             >
                               View
-                            </a>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteDocument(doc._id)}

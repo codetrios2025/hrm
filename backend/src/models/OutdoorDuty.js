@@ -1,7 +1,15 @@
 import mongoose from "mongoose";
+import { tenantQueryGuard } from "../plugins/tenantQueryGuard.js";
 
 const outdoorDutySchema = new mongoose.Schema(
   {
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+      immutable: true,
+      index: true,
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -59,7 +67,13 @@ const outdoorDutySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Prevent multiple OD requests by the same employee for the exact same date
-outdoorDutySchema.index({ userId: 1, date: 1 }, { unique: true });
+// Prevent multiple OD requests by the same employee for the exact same date per tenant
+outdoorDutySchema.index(
+  { tenantId: 1, userId: 1, date: 1 },
+  { unique: true },
+);
+outdoorDutySchema.index({ tenantId: 1, status: 1, date: 1 });
+outdoorDutySchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+tenantQueryGuard(outdoorDutySchema);
 
 export const OutdoorDuty = mongoose.model("OutdoorDuty", outdoorDutySchema);

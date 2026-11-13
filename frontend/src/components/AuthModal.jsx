@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { Lock, Mail, ArrowLeft, KeyRound } from "lucide-react";
+import { Lock, Mail, ArrowLeft, KeyRound, Building2 } from "lucide-react";
 import api from "../api/client";
 import logoImg from "../assets/logo.png";
 
 export default function AuthModal() {
   const [view, setView] = useState("login"); // 'login' | 'forgot' | 'reset'
+  const [companySlug, setCompanySlug] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
@@ -19,6 +20,8 @@ export default function AuthModal() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("resetToken");
+    const companyCode = params.get("companySlug");
+    if (companyCode) setCompanySlug(companyCode);
     if (token) {
       setResetToken(token);
       setView("reset");
@@ -29,7 +32,7 @@ export default function AuthModal() {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email, password);
+      await login(companySlug, email, password);
       showSuccess("Logged in successfully");
     } catch (err) {
       showError(err.message);
@@ -42,7 +45,10 @@ export default function AuthModal() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await api.post("/auth/forgot-password", { email });
+      const res = await api.post("/auth/forgot-password", {
+        companySlug,
+        email,
+      });
       showSuccess(res.message || "Check your email for reset instructions.");
       setView("login");
     } catch (err) {
@@ -57,6 +63,7 @@ export default function AuthModal() {
     setLoading(true);
     try {
       const res = await api.post(`/auth/reset-password/${resetToken}`, {
+        companySlug,
         password: newPassword,
       });
       showSuccess(res.message || "Password reset successfully. Please log in.");
@@ -95,6 +102,23 @@ export default function AuthModal() {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-600 mb-1 font-medium">
+                  Company Code
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    autoComplete="organization"
+                    placeholder="company-code"
+                    required
+                    className="w-full border rounded-lg p-2.5 pl-8 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    value={companySlug}
+                    onChange={(e) => setCompanySlug(e.target.value)}
+                  />
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-2.5 top-3" />
+                </div>
+              </div>
               <div>
                 <label className="block text-slate-600 mb-1 font-medium">
                   Work Email
@@ -163,6 +187,20 @@ export default function AuthModal() {
             </div>
 
             <form onSubmit={handleForgot} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-600 mb-1 font-medium">
+                  Company Code
+                </label>
+                <input
+                  type="text"
+                  autoComplete="organization"
+                  placeholder="company-code"
+                  required
+                  className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  value={companySlug}
+                  onChange={(e) => setCompanySlug(e.target.value)}
+                />
+              </div>
               <div>
                 <label className="block text-slate-600 mb-1 font-medium">
                   Registered Work Email
@@ -247,6 +285,14 @@ export default function AuthModal() {
               </button>
             </form>
           </>
+        )}
+        {view === "login" && (
+          <p className="mt-5 text-center text-xs text-slate-500">
+            New to oliveHRM?{" "}
+            <a href="/signup" className="font-semibold text-indigo-600 hover:underline">
+              Create a company workspace
+            </a>
+          </p>
         )}
       </div>
     </div>

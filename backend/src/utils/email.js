@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { ENV } from "../config/env.js";
 
-const transporter = nodemailer.createTransport({
+export const emailTransport = nodemailer.createTransport({
   host: ENV.EMAIL_HOST,
   port: Number(ENV.EMAIL_PORT),
   secure: Number(ENV.EMAIL_PORT) === 465,
@@ -47,7 +47,7 @@ export const sendCredentialsEmail = async ({ name, email, password, role }) => {
     </div>
   `;
 
-  return transporter.sendMail({
+  return emailTransport.sendMail({
     from: ENV.EMAIL_FROM,
     to: email,
     subject: "Your Account Credentials - HR Attendance & Leave Portal",
@@ -55,8 +55,13 @@ export const sendCredentialsEmail = async ({ name, email, password, role }) => {
   });
 };
 
-export const sendResetPasswordEmail = async ({ name, email, resetToken }) => {
-  const resetUrl = `${ENV.FRONTEND_URL}/?resetToken=${resetToken}`;
+export const sendResetPasswordEmail = async ({
+  name,
+  email,
+  resetToken,
+  companySlug,
+}) => {
+  const resetUrl = `${ENV.FRONTEND_URL}/?resetToken=${resetToken}&companySlug=${encodeURIComponent(companySlug)}`;
 
   const html = `
     <div style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 24px; color: #1e293b;">
@@ -76,7 +81,7 @@ export const sendResetPasswordEmail = async ({ name, email, resetToken }) => {
     </div>
   `;
 
-  return transporter.sendMail({
+  return emailTransport.sendMail({
     from: ENV.EMAIL_FROM,
     to: email,
     subject: "Password Reset Request - HR Attendance Portal",
@@ -85,7 +90,7 @@ export const sendResetPasswordEmail = async ({ name, email, resetToken }) => {
 };
 
 export const sendEmail = async ({ to, subject, html }) => {
-  return transporter.sendMail({
+  return emailTransport.sendMail({
     from: ENV.EMAIL_FROM,
     to,
     subject,
@@ -115,10 +120,156 @@ export const sendEmailWithPassword = async ({
       </div>
     </div>
   `;
-  return transporter.sendMail({
+  return emailTransport.sendMail({
     from: ENV.EMAIL_FROM,
     to: email,
     subject: "Password Reset Notification - HR Attendance Portal",
     html,
+  });
+};
+
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+
+export const sendTenantAdminWelcomeEmail = async ({
+  name,
+  email,
+  password,
+  companySlug,
+}) => {
+  const loginUrl = `${ENV.FRONTEND_URL.replace(/\/$/, "")}/?companySlug=${encodeURIComponent(companySlug)}`;
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePassword = escapeHtml(password);
+  const safeSlug = escapeHtml(companySlug);
+  const safeLoginUrl = escapeHtml(loginUrl);
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+      <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+        <h2>Welcome to the HR Portal</h2>
+        <p>Hello <strong>${safeName}</strong>, your HR Administrator account is ready.</p>
+        <p><strong>Company Code:</strong> ${safeSlug}</p>
+        <p><strong>Login Email:</strong> ${safeEmail}</p>
+        <p><strong>Temporary Password:</strong> <code>${safePassword}</code></p>
+        <p><a href="${safeLoginUrl}">Log in to your company</a></p>
+        <p>For security, change your password after signing in.</p>
+      </div>
+    </div>
+  `;
+
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: email,
+    subject: "Your HR Portal administrator account",
+    html,
+  });
+};
+
+export const sendEmailVerification = async ({
+  name,
+  email,
+  companySlug,
+  token,
+}) => {
+  const verificationUrl = `${ENV.FRONTEND_URL.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}&companySlug=${encodeURIComponent(companySlug)}`;
+  const safeName = escapeHtml(name);
+  const safeUrl = escapeHtml(verificationUrl);
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+      <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+        <h2>Verify your oliveHRM email</h2>
+        <p>Hello <strong>${safeName}</strong>,</p>
+        <p>Your company workspace is ready. Verify this email address to secure your administrator account.</p>
+        <p><a href="${safeUrl}">Verify email address</a></p>
+        <p style="font-size: 12px; color: #64748b;">This link expires in 24 hours. If you did not sign up, ignore this message.</p>
+      </div>
+    </div>
+  `;
+
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: email,
+    subject: "Verify your oliveHRM email address",
+    html,
+  });
+};
+
+export const sendTenantRequestVerificationEmail = async ({
+  contactName,
+  email,
+  token,
+}) => {
+  const verificationUrl = `${ENV.FRONTEND_URL.replace(/\/$/, "")}/signup-request/verify?token=${encodeURIComponent(token)}`;
+  const safeName = escapeHtml(contactName);
+  const safeUrl = escapeHtml(verificationUrl);
+
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: email,
+    subject: "Verify your oliveHRM tenant request",
+    html: `
+      <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+        <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2>Verify your email address</h2>
+          <p>Hello <strong>${safeName}</strong>,</p>
+          <p>Verify your email to submit your oliveHRM company request for review.</p>
+          <p><a href="${safeUrl}">Verify email and submit request</a></p>
+          <p style="font-size: 12px; color: #64748b;">This link expires in 24 hours. If you did not make this request, ignore this email.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+export const sendTenantRequestReceivedEmail = async ({ contactName, email }) => {
+  const safeName = escapeHtml(contactName);
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: email,
+    subject: "We received your oliveHRM request",
+    html: `
+      <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+        <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2>We received your request</h2>
+          <p>Hello <strong>${safeName}</strong>,</p>
+          <p>We received your request to create an oliveHRM workspace. Please verify your email using the separate verification message. We will contact you with next steps.</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+export const sendTenantRequestRejectedEmail = async ({
+  contactName,
+  email,
+  rejectionReason,
+}) => {
+  const safeName = escapeHtml(contactName);
+  const safeReason = escapeHtml(rejectionReason);
+  return emailTransport.sendMail({
+    from: ENV.EMAIL_FROM,
+    to: email,
+    subject: "Update on your oliveHRM workspace request",
+    html: `
+      <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #1e293b;">
+        <div style="max-width: 560px; margin: 0 auto; background: #fff; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2>Update on your workspace request</h2>
+          <p>Hello <strong>${safeName}</strong>,</p>
+          <p>We are unable to approve your oliveHRM workspace request at this time.</p>
+          <p><strong>Reason:</strong> ${safeReason}</p>
+        </div>
+      </div>
+    `,
   });
 };

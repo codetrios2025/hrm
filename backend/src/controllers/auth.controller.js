@@ -1,31 +1,55 @@
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.js";
+import Tenant from "../models/Tenant.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResetPasswordEmail } from "../utils/email.js";
 import { ENV } from "../config/env.js";
+import { ROLES } from "../constants/roles.js";
 import crypto from "crypto"; // Import crypto for generating secure tokens
+import { PLANS } from "../config/plans.js";
 
-const generateToken = (id, role) => {
-  return jwt.sign({ id, role }, ENV.JWT_SECRET, {
+const generateToken = (id, role, tenantId) => {
+  return jwt.sign({ id, role, tenantId }, ENV.JWT_SECRET, {
     expiresIn: ENV.JWT_EXPIRES_IN,
   });
 };
 
 export const register = asyncHandler(async (req, res) => {
-  const { name, email, password, role, reportingManager } = req.body;
+  const { companySlug, name, email, password, reportingManager } = req.body;
+  const tenant = await Tenant.findOne({
+    slug: companySlug.trim().toLowerCase(),
+  });
 
-  const existingUser = await User.findOne({ email });
+  if (!tenant || ["suspended", "deleted"].includes(tenant.status)) {
+    throw new ApiError(400, "Invalid or unavailable company code");
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = await User.findOne({
+    tenantId: tenant._id,
+    email: normalizedEmail,
+  });
   if (existingUser) {
     throw new ApiError(409, "An account with this email already exists");
   }
 
+  if (reportingManager) {
+    const manager = await User.findOne({
+      _id: reportingManager,
+      tenantId: tenant._id,
+    });
+    if (!manager) {
+      throw new ApiError(400, "Reporting manager is not in this company");
+    }
+  }
+
   const user = await User.create({
+    tenantId: tenant._id,
     name,
-    email,
+    email: normalizedEmail,
     password,
-    role,
+    role: ROLES.EMPLOYEE,
     reportingManager,
   });
 
@@ -37,43 +61,35 @@ export const register = asyncHandler(async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      tenantId: user.tenantId,
     },
     "User registered successfully",
   );
 });
 
-export const loginold = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-
-  const user = await User.findOne({ email }).select("+password");
-  if (!user || !(await user.isPasswordCorrect(password))) {
-    throw new ApiError(401, "Invalid credentials");
-  }
-
-  const token = generateToken(user._id, user.role);
-
-  return ApiResponse.send(
-    res,
-    200,
-    {
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        leaveBalance: user.leaveBalance,
-      },
-    },
-    "Login successful",
-  );
-});
-
 export const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email }).select("+password");
+  const { companySlug, email, password } = req.body;
+  const tenant = await Tenant.findOne({
+    slug: companySlug.trim().toLowerCase(),
+  });
+  if (!tenant) {
+    throw new ApiError(401, "Invalid company code or credentials");
+  }
+  if (
+    tenant.status === "suspended" &&
+    tenant.billing?.suspensionReason !== "non-payment"
+  ) {
+    throw new ApiError(403, "This company account is suspended");
+  }
+  if (tenant.status === "deleted") {
+    throw new ApiError(403, "This company account is unavailable");
+  }
+  const user = await User.findOne({
+    tenantId: tenant._id,
+    email: email.trim().toLowerCase(),
+  }).select("+password");
   if (!user || !(await user.isPasswordCorrect(password))) {
-    throw new ApiError(401, "Invalid email or password");
+    throw new ApiError(401, "Invalid company code or credentials");
   }
 
   // Block deactivated users
@@ -84,7 +100,10 @@ export const login = asyncHandler(async (req, res) => {
     );
   }
 
-  const token = generateToken(user._id, user.role);
+  user.lastLoginAt = new Date();
+  await user.save({ validateBeforeSave: false });
+
+  const token = generateToken(user._id, user.role, tenant._id);
 
   return ApiResponse.send(
     res,
@@ -98,21 +117,58 @@ export const login = asyncHandler(async (req, res) => {
         role: user.role,
         isActive: user.isActive,
         leaveBalance: user.leaveBalance,
+        tenantId: tenant._id,
+        emailVerified: user.emailVerified !== false,
+        onboardingCompleted: tenant.onboarding?.completed ?? true,
+        onboardingStep: tenant.onboarding?.step ?? 5,
+        plan: tenant.plan,
+        planFeatures: PLANS[tenant.plan]?.modules || [],
+        tenantStatus: tenant.status,
+        trialEndsAt: tenant.trialEndsAt,
       },
     },
     "Login successful",
   );
 });
 
+export const loginold = login;
+
 export const getMe = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("-password");
-  return ApiResponse.send(res, 200, user, "Profile details retrieved");
+  const [user, tenant] = await Promise.all([
+    User.findOne({
+      _id: req.user._id,
+      tenantId: req.tenantId,
+    }).select("-password"),
+    Tenant.findById(req.tenantId)
+      .select("onboarding plan status trialEndsAt")
+      .lean(),
+  ]);
+  if (!user || !tenant) {
+    throw new ApiError(404, "Account or tenant could not be found");
+  }
+  const profile = user.toObject ? user.toObject() : { ...user };
+  profile.emailVerified = user.emailVerified !== false;
+  profile.onboardingCompleted = tenant.onboarding?.completed ?? true;
+  profile.onboardingStep = tenant.onboarding?.step ?? 5;
+  profile.plan = tenant.plan;
+  profile.planFeatures = PLANS[tenant.plan]?.modules || [];
+  profile.tenantStatus = tenant.status;
+  profile.trialEndsAt = tenant.trialEndsAt;
+  return ApiResponse.send(res, 200, profile, "Profile details retrieved");
 });
 
 // Forgot Password -> Sends email with reset link
 export const forgotPassword = asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  const user = await User.findOne({ email });
+  const { companySlug, email } = req.body;
+  const tenant = await Tenant.findOne({
+    slug: companySlug.trim().toLowerCase(),
+  });
+  const user = tenant && !["suspended", "deleted"].includes(tenant.status)
+    ? await User.findOne({
+        tenantId: tenant._id,
+        email: email.trim().toLowerCase(),
+      })
+    : null;
   if (!user) {
     // Avoid user enumeration: respond with success even if email not found
     return ApiResponse.send(
@@ -131,6 +187,7 @@ export const forgotPassword = asyncHandler(async (req, res) => {
       name: user.name,
       email: user.email,
       resetToken,
+      companySlug: tenant.slug,
     });
     return ApiResponse.send(
       res,
@@ -147,17 +204,24 @@ export const forgotPassword = asyncHandler(async (req, res) => {
 });
 
 export const forgotPasswordnew = asyncHandler(async (req, res) => {
-  const { email } = req.body;
+  const { companySlug, email } = req.body;
 
-  if (!email) {
-    throw new ApiError(400, "Email is required");
+  if (!companySlug || !email) {
+    throw new ApiError(400, "Company code and email are required");
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-
-  const user = await User.findOne({
-    email: normalizedEmail,
+  const tenant = await Tenant.findOne({
+    slug: companySlug.trim().toLowerCase(),
   });
+
+  const user =
+    tenant && !["suspended", "deleted"].includes(tenant.status)
+      ? await User.findOne({
+          tenantId: tenant._id,
+          email: normalizedEmail,
+        })
+      : null;
 
   /**
    * Avoid user enumeration.
@@ -221,6 +285,7 @@ export const forgotPasswordnew = asyncHandler(async (req, res) => {
       name: user.name,
       email: user.email,
       resetToken,
+      companySlug: tenant.slug,
     });
 
     return ApiResponse.send(
@@ -249,12 +314,20 @@ export const forgotPasswordnew = asyncHandler(async (req, res) => {
 
 // Reset Password with Token
 export const resetPassword = asyncHandler(async (req, res) => {
+  const tenant = await Tenant.findOne({
+    slug: req.body.companySlug.trim().toLowerCase(),
+  });
+  if (!tenant || ["suspended", "deleted"].includes(tenant.status)) {
+    throw new ApiError(400, "Invalid or unavailable company code");
+  }
+
   const hashedToken = crypto
     .createHash("sha256")
     .update(req.params.token)
     .digest("hex");
 
   const user = await User.findOne({
+    tenantId: tenant._id,
     passwordResetToken: hashedToken,
     passwordResetExpires: { $gt: Date.now() },
   });
@@ -280,7 +353,10 @@ export const resetPassword = asyncHandler(async (req, res) => {
 export const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
 
-  const user = await User.findById(req.user._id).select("+password");
+  const user = await User.findOne({
+    _id: req.user._id,
+    tenantId: req.tenantId,
+  }).select("+password");
   if (!(await user.isPasswordCorrect(currentPassword))) {
     throw new ApiError(400, "Incorrect current password");
   }

@@ -19,11 +19,36 @@ import Pagination from "./Pagination";
 import { useToast } from "../context/ToastContext";
 import EmployeeProfileModal from "./EmployeeProfileModal";
 
+const createStaffFormDefaults = (policy = {}) => {
+  const defaults = policy || {};
+  return {
+    employeeId: "",
+    name: "",
+    email: "",
+    role: "employee",
+    reportingManager: "",
+    casualLeave: defaults.casual ?? 12,
+    sickLeave: defaults.sick ?? 8,
+    paidLeave: defaults.paid ?? 15,
+    optionalHoliday: defaults.oh ?? 2,
+    coffBalance: defaults.coff ?? 0,
+    paternityLeave: defaults.paternity ?? 3,
+    maternityLeave: defaults.maternity ?? 182,
+    bereavementLeave: defaults.bereavement ?? 3,
+    lwp: defaults.lwp ?? 0,
+  };
+};
+
 export default function AdminPanel() {
   const [staff, setStaff] = useState([]);
   const [allStaff, setAllStaff] = useState([]);
   const [managers, setManagers] = useState([]);
   const [pagination, setPagination] = useState(null);
+  const [tenantUsage, setTenantUsage] = useState(null);
+  const [tenantUsageError, setTenantUsageError] = useState("");
+  const [tenantLeavePolicy, setTenantLeavePolicy] = useState(null);
+  const [leavePolicyError, setLeavePolicyError] = useState("");
+  const [planLimitError, setPlanLimitError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState(null);
   const [balanceForm, setBalanceForm] = useState({
@@ -43,22 +68,7 @@ export default function AdminPanel() {
   // Single Staff Creation State with All Leave Quotas
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    employeeId: "",
-    name: "",
-    email: "",
-    role: "employee",
-    reportingManager: "",
-    casualLeave: 12,
-    sickLeave: 8,
-    paidLeave: 15,
-    optionalHoliday: 2,
-    coffBalance: 0,
-    paternityLeave: 3,
-    maternityLeave: 182,
-    bereavementLeave: 3,
-    lwpBalance: 0,
-  });
+  const [createForm, setCreateForm] = useState(() => createStaffFormDefaults());
 
   // Bulk Import State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -138,6 +148,48 @@ export default function AdminPanel() {
     fetchAllStaff();
   }, [currentPage]);
 
+  useEffect(() => {
+    let active = true;
+    api
+      .get("/admin/usage")
+      .then((res) => {
+        if (active) setTenantUsage(res.data);
+      })
+      .catch((err) => {
+        if (active) setTenantUsageError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .get("/onboarding")
+      .then((res) => {
+        if (!active) return;
+        const policy = res.data?.leavePolicy;
+        if (!policy) return;
+        setTenantLeavePolicy(policy);
+        setCreateForm((current) => ({
+          ...current,
+          ...createStaffFormDefaults(policy),
+          employeeId: current.employeeId,
+          name: current.name,
+          email: current.email,
+          role: current.role,
+          reportingManager: current.reportingManager,
+        }));
+      })
+      .catch((err) => {
+        if (active) setLeavePolicyError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const handleToggleStatus = async (employeeId) => {
     try {
       const res = await api.patch("/admin/toggle-status", { employeeId });
@@ -212,25 +264,16 @@ export default function AdminPanel() {
       const res = await api.post("/admin/create-staff", createForm);
       showSuccess(res.message || "Staff user created successfully!");
       setShowCreateModal(false);
-      setCreateForm({
-        employeeId: "",
-        name: "",
-        email: "",
-        role: "employee",
-        reportingManager: "",
-        casualLeave: 12,
-        sickLeave: 8,
-        paidLeave: 15,
-        optionalHoliday: 2,
-        coffBalance: 0,
-        paternityLeave: 3,
-        maternityLeave: 182,
-        bereavementLeave: 3,
-        lwpBalance: 0,
-      });
+      setCreateForm(createStaffFormDefaults(tenantLeavePolicy));
+      setPlanLimitError("");
       fetchStaff(1);
       fetchAllStaff();
+      api
+        .get("/admin/usage")
+        .then((res) => setTenantUsage(res.data))
+        .catch((err) => setTenantUsageError(err.message));
     } catch (err) {
+      if (err.code === "PLAN_LIMIT_REACHED") setPlanLimitError(err.message);
       showError(err.message);
     } finally {
       setCreateLoading(false);
@@ -248,28 +291,20 @@ export default function AdminPanel() {
 
     setImporting(true);
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        (import.meta.env.VITE_API_URL || "http://localhost:5000/api") +
-          "/admin/bulk-import",
-        {
-          method: "POST",
-          headers: { Authorization: "Bearer " + token },
-          body: formData,
-        },
-      );
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "Bulk import failed");
-      }
+      const data = await api.post("/admin/bulk-import", formData);
 
       showSuccess(data.message);
       setShowImportModal(false);
       setSelectedCsv(null);
+      setPlanLimitError("");
       fetchStaff(1);
       fetchAllStaff();
+      api
+        .get("/admin/usage")
+        .then((res) => setTenantUsage(res.data))
+        .catch((err) => setTenantUsageError(err.message));
     } catch (err) {
+      if (err.code === "PLAN_LIMIT_REACHED") setPlanLimitError(err.message);
       showError(err.message);
     } finally {
       setImporting(false);
@@ -577,16 +612,85 @@ export default function AdminPanel() {
         </div>
       </div>
 
-      {/* EXPORT REPORT SECTION */}
-      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-          <h3 className="font-semibold text-xs text-slate-800 uppercase tracking-wider">
-            Export Attendance / Leave Report
-          </h3>
+      {tenantUsageError && (
+        <p role="alert" className="text-sm text-rose-700">
+          Employee usage could not be loaded: {tenantUsageError}
+        </p>
+      )}
+      {leavePolicyError && (
+        <p role="alert" className="text-sm text-rose-700">
+          Tenant leave defaults could not be loaded: {leavePolicyError}
+        </p>
+      )}
+      {tenantUsage && (
+        <div
+          className={`flex flex-col justify-between gap-2 rounded-lg border px-4 py-3 text-sm sm:flex-row sm:items-center ${
+            tenantUsage.employeeCount >= tenantUsage.effectiveEmployeeLimit
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : "border-[#e1e6d6] bg-[#f7f8f2] text-slate-700"
+          }`}
+        >
+          <div>
+            <span className="font-semibold">
+              Current plan: {tenantUsage.planLabel}
+            </span>
+            <span className="ml-3 font-semibold">
+              Employee usage: {tenantUsage.employeeCount} /{" "}
+              {tenantUsage.effectiveEmployeeLimit}
+            </span>
+            <span className="ml-2 text-xs">
+              Plan limit: {tenantUsage.planEmployeeLimit}
+              {tenantUsage.employeeLimitOverride != null &&
+                ` · custom limit ${tenantUsage.employeeLimitOverride}`}
+            </span>
+          </div>
+          {tenantUsage.employeeCount >= tenantUsage.effectiveEmployeeLimit && (
+            <span className="text-xs font-medium">
+              You've reached your {tenantUsage.planLabel} plan limit. Upgrade
+              your plan to add more employees.
+            </span>
+          )}
         </div>
+      )}
+      {planLimitError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          {planLimitError} Upgrade your plan to continue.
+        </p>
+      )}
+      {tenantUsage?.trialDaysLeft !== null &&
+        tenantUsage?.trialDaysLeft !== undefined && (
+          <div
+            role={tenantUsage.trialDaysLeft <= 5 ? "alert" : "status"}
+            className={`rounded-lg border px-4 py-3 text-sm ${
+              tenantUsage.trialDaysLeft <= 5
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-[#e1e6d6] bg-[#f7f8f2] text-slate-700"
+            }`}
+          >
+            {tenantUsage.trialDaysLeft === 0
+              ? "Your trial has ended. Your workspace is read-only; upgrade to resume changes."
+              : tenantUsage.trialDaysLeft <= 5
+                ? `Your trial ends in ${tenantUsage.trialDaysLeft} ${
+                    tenantUsage.trialDaysLeft === 1 ? "day" : "days"
+                  }. Upgrade now to keep making changes.`
+                : `Free trial: ${tenantUsage.trialDaysLeft} days remaining.`}
+          </div>
+        )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
+      {/* EXPORT REPORT SECTION */}
+      {tenantUsage?.modules?.includes("exports") ? (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <h3 className="font-semibold text-xs text-slate-800 uppercase tracking-wider">
+              Export Attendance / Leave Report
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
           <div>
             <label className="block text-slate-500 mb-1">Target Employee</label>
             <select
@@ -674,8 +778,13 @@ export default function AdminPanel() {
               <span>{downloading ? "Exporting..." : "Download CSV"}</span>
             </button>
           </div>
+          </div>
         </div>
-      </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Exports are included in the Pro plan. Upgrade to unlock report exports.
+          </div>
+        )}
 
       {/* STAFF TABLE */}
       <div className="overflow-x-auto">

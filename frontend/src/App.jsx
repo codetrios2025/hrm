@@ -5,6 +5,7 @@ import AuthModal from "./components/AuthModal";
 import AttendanceCard from "./components/AttendanceCard";
 import MyAttendanceSheet from "./components/MyAttendanceSheet";
 import AdminPanel from "./components/AdminPanel";
+import AdminDashboard from "./components/AdminDashboard";
 import OutdoorDutyManager from "./components/OutdoorDutyManager";
 import LeaveManager from "./components/LeaveManager";
 import ChangePasswordModal from "./components/ChangePasswordModal";
@@ -13,6 +14,7 @@ import AdminLeaveHistory from "./components/AdminLeaveHistory";
 import EmployeeProfileModal from "./components/EmployeeProfileModal";
 import AdminEmployeeAttendance from "./components/AdminEmployeeAttendance";
 import HRMTaskTimeTracker from "./components/HRMTaskTimeTracker";
+import OnboardingWizard from "./components/OnboardingWizard";
 
 /*
 |--------------------------------------------------------------------------
@@ -31,6 +33,7 @@ import HRMTaskTimeTracker from "./components/HRMTaskTimeTracker";
 import OfficialHolidayManager from "./components/OfficialHolidayManager";
 
 import {
+  LayoutDashboard,
   LogOut,
   User as UserIcon,
   KeyRound,
@@ -52,10 +55,17 @@ export default function App() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
 
-  // Active Menu Tab
-  const [activeTab, setActiveTab] = useState("daily-punch");
+  const [tabSelection, setTabSelection] = useState(null);
+  const activeTab =
+  tabSelection && user && tabSelection.userId === user._id
+    ? tabSelection.id
+    : user?.role === "admin"
+      ? "admin-dashboard"
+      : "daily-punch";
+  const setActiveTab = (id) => setTabSelection({ userId: user?._id, id });
 
   const handleLogout = () => {
+    setTabSelection(null);
     logout();
     showInfo("Logged out successfully");
   };
@@ -83,6 +93,9 @@ export default function App() {
   if (!user) {
     return <AuthModal />;
   }
+  if (user.role === "admin" && user.onboardingCompleted === false) {
+    return <OnboardingWizard />;
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -94,6 +107,15 @@ export default function App() {
   */
 
   const menuItems = [
+    ...(user.role === "admin"
+      ? [
+          {
+            id: "admin-dashboard",
+            label: "Dashboard",
+            icon: LayoutDashboard,
+          },
+        ]
+      : []),
     {
       id: "daily-punch",
       label: "Daily Punch",
@@ -175,11 +197,15 @@ export default function App() {
       label: "Leave Management",
       icon: Calendar,
     },
-    {
-      id: "task-time-tracker",
-      label: "Task Time Tracker",
-      icon: Clock,
-    },
+    ...(user.planFeatures?.includes("taskTimeTracker")
+      ? [
+          {
+            id: "task-time-tracker",
+            label: "Task Time Tracker",
+            icon: Clock,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -276,6 +302,12 @@ export default function App() {
         </div>
       </header>
 
+      {!user.emailVerified && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-900">
+          Your email address is not verified yet. Use the verification link we sent to your inbox.
+        </div>
+      )}
+
       {/* ------------------------------------------------------------------ */}
       {/* Main Body                                                          */}
       {/* ------------------------------------------------------------------ */}
@@ -334,6 +366,10 @@ export default function App() {
           {/* HR ADMIN MODULES                                                 */}
           {/* ---------------------------------------------------------------- */}
 
+          {activeTab === "admin-dashboard" && user.role === "admin" && (
+            <AdminDashboard />
+          )}
+
           {activeTab === "admin-panel" && user.role === "admin" && (
             <AdminPanel />
           )}
@@ -369,9 +405,10 @@ export default function App() {
           {/* Leave Management */}
           {activeTab === "leave-management" && <LeaveManager />}
           {/* Task Time Tracker */}
-          {activeTab === "task-time-tracker" && (
+          {activeTab === "task-time-tracker" &&
+            user.planFeatures?.includes("taskTimeTracker") && (
             <HRMTaskTimeTracker loggedInEmployeeEmail={user.email} />
-          )}
+            )}
         </main>
       </div>
 

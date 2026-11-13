@@ -9,6 +9,8 @@ import {
 } from "../controllers/holiday.controller.js";
 
 import { authenticate, authorize } from "../middlewares/auth.middleware.js";
+import { checkPlanLimit } from "../middlewares/checkPlanLimit.js";
+import { ApiError } from "../utils/ApiError.js";
 
 import { validate } from "../middlewares/validate.middleware.js";
 
@@ -32,7 +34,13 @@ const router = Router();
 |--------------------------------------------------------------------------
 */
 
-router.use(authenticate);
+router.use(authenticate, checkPlanLimit(), (req, res, next) => {
+  if (!req.user.tenantId) {
+    return next(new ApiError(403, "Tenant context is required"));
+  }
+  req.tenantId = req.user.tenantId;
+  next();
+});
 
 /*
 |--------------------------------------------------------------------------

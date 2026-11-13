@@ -1,18 +1,16 @@
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { ApiError } from "../utils/ApiError.js";
-
-// Ensure uploads/documents directory exists
-const uploadDir = path.join(process.cwd(), "uploads", "documents");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+import { ensureTenantUploadDirectory } from "../utils/uploadPaths.js";
 
 // Configure Disk Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    try {
+      cb(null, ensureTenantUploadDirectory(req.tenantId, "documents"));
+    } catch (error) {
+      cb(error);
+    }
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
